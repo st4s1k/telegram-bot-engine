@@ -232,5 +232,20 @@
   "lang_set": "✅ Language set: {0}",
   "lang_unknown": "⚠️ Unknown language `{0}`. Available: {1}",
 
+  "help_engine": [
+    "🤖 **Commands**",
+    "",
+    "*⚙️ Core*",
+    "`/help` — this message",
+    "`/info` — chat status (role, model, history size)",
+    "`/lang` `[code]` — switch the UI language (or list available)",
+    "`/config` `[key value]` · `reset` · `preset <name>` — chat settings",
+    "`/model` `[id]` · `vision <id>` · `summary <id>` · `reset` — model, price, balance",
+    "`/memory` `add` · `list` · `del N` · `forget` · `dedupe` · `size_chars N` — long-term memory",
+    "`/summary` — incremental \"what's new\" digest",
+    "`/rp` `<role>` · `off` — set / clear the chat role",
+    "`/stop` · `/resume` — pause / unpause"
+  ],
+
   "vision_hd_default": ["zoom"]
 }

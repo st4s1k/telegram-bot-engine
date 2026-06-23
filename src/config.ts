@@ -4,7 +4,7 @@
 // keys and their validation. The help/status/config-reference builders also live here.
 
 import { escapeRegExp, historyChars } from "./utils";
-import { t, tList } from "./i18n";
+import { t, tList, DEFAULT_LANG } from "./i18n";
 import { saveChatConfig } from "./storage";
 import { getPersona, getPersonaConfig, getAllCommands, getPersonaTexts } from "./persona/registry";
 import type { BotConfig, ChatConfig, CmdRegexEntry, ConfigMeta, Ctx, Env } from "./types";
@@ -255,9 +255,13 @@ export function setConfigParam(ctx: Ctx, key: string, rawVal: string): string {
   return t(lang, "cfg_set_ok_desc", key, parsed.value, t(lang, meta.desc));
 }
 
-// /help — the text is curated by the persona pack (its own command list). The engine just serves it.
-export function buildHelp(lang: string = "ru"): string {
-  return getPersonaTexts(lang).helpText;
+// /help — the engine renders its OWN base command list, then APPENDS the persona's additions (its own
+// commands + notes). The persona's helpText is just its section (it no longer re-lists engine commands);
+// without a persona it's empty and only the base shows.
+export function buildHelp(lang: string = DEFAULT_LANG): string {
+  const base = t(lang, "help_engine");
+  const persona = getPersonaTexts(lang).helpText;
+  return persona ? `${base}\n\n${persona}` : base;
 }
 
 export function buildInfoStatus(ctx: Ctx): string {

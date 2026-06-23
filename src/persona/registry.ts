@@ -109,7 +109,7 @@ export interface PersonaPack {
 // A neutral default — so the engine builds/runs WITHOUT a persona (personaless, for Phase 2).
 // In Phase 1 the pack is always registered before the first call, so this is just a stub.
 const NEUTRAL: PersonaPack = {
-  texts: { defaultVoice: "", languageLine: "", fallbackError: "error, try again later", fallbackNoCredits: "out of credits", wakeWords: [], usernameAliases: {}, targetNameFallback: "friend", helpText: "Commands: /help · /config · /info · /model · /memory · /summary · /stop · /resume", infoTitle: "ℹ️ **Status**" },
+  texts: { defaultVoice: "", languageLine: "", fallbackError: "error, try again later", fallbackNoCredits: "out of credits", wakeWords: [], usernameAliases: {}, targetNameFallback: "friend", helpText: "", infoTitle: "ℹ️ **Status**" },
 };
 
 let active: PersonaPack = NEUTRAL;
