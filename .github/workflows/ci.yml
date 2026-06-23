@@ -1,0 +1,25 @@
+name: CI
+
+# Движок — переиспользуемая библиотека: CI только проверяет (typecheck + тесты) на НЕЙТРАЛЬНОМ
+# паке (без PERSONA_PACK → src/persona/active.ts = import "./default"). Деплой живёт в проекте-паке,
+# который потребляет движок и подкладывает свой пак через PERSONA_PACK.
+on:
+  push:
+    branches: [master]
+  pull_request: {}
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Typecheck (нейтральный пак)
+        run: npm run check
+      - name: Tests (нейтральный пак)
+        run: npm test

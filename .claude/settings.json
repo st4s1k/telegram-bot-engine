@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx wrangler deploy:*)",
+      "Bash(wrangler deploy:*)",
+      "Bash(npx wrangler versions upload:*)",
+      "Bash(wrangler versions upload:*)",
+      "Bash(git push:*)"
+    ]
+  }
+}
