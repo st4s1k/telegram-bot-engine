@@ -4,7 +4,7 @@
 // keys and their validation. The help/status/config-reference builders also live here.
 
 import { escapeRegExp, historyChars } from "./utils";
-import { t, tList, DEFAULT_LANG } from "./i18n";
+import { t, tList, DEFAULT_LANG, LOCALES } from "./i18n";
 import { saveChatConfig } from "./storage";
 import { getPersona, getPersonaConfig, getAllCommands, getPersonaTexts } from "./persona/registry";
 import type { BotConfig, ChatConfig, CmdRegexEntry, ConfigMeta, Ctx, Env } from "./types";
@@ -241,6 +241,12 @@ export function setConfigParam(ctx: Ctx, key: string, rawVal: string): string {
 
   const parsed = parseConfigValue(meta, rawVal, lang);
   if (!parsed.ok) return t(lang, "cfg_set_error", parsed.error, key);
+
+  // `lang` must be a discovered locale — reject an unknown one (don't silently switch). English stays the
+  // default in the repo, but changing to a non-existent language is an error, not a silent fallback.
+  if (key === "lang" && parsed.value && !LOCALES.includes(String(parsed.value))) {
+    return t(lang, "lang_unknown", parsed.value, LOCALES.join(", "));
+  }
 
   const newConf: ChatConfig = { ...ctx.chatData.config, [key]: parsed.value };
   saveChatConfig(ctx, newConf);
