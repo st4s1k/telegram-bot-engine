@@ -3,7 +3,7 @@
 // their output is NOT written to history; LLM_COMMANDS — content commands (with "typing", stored).
 
 import { MEM_MAX_FACT_CHARS } from "./constants";
-import { t } from "./i18n";
+import { t, tList } from "./i18n";
 import {
   makeCtx, parseCommandAndArg, historyChars, tzParts,
 } from "./utils";
@@ -45,7 +45,7 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
     }
 
     // /config preset [name] — apply a mode (a batch of settings). Without a name — list the presets.
-    if (key === "preset" || key === "режим") {
+    if (key === "preset" || tList(lang, "cmd_preset_aliases").includes(key)) {
       const name = cmdVal.trim().toLowerCase();
       if (!name) {
         return [t(lang, "cfg_preset_header"),
@@ -234,7 +234,7 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
     // memory works like notes, but the bot does not recall facts in replies — hint about this neutrally.
     const ragHint = ctx.cfg.rag ? "" : t(lang, "mem_hint_notes");
 
-    if (sub === "forget" || sub === "clear" || sub === "стереть" || sub === "забыть") {
+    if (sub === "forget" || sub === "clear" || tList(lang, "mem_sub_forget").includes(sub)) {
       ctx.chatData.photoCache = {};
       ctx.chatData.role = null;
       ctx.chatData.personaState = getPersonaStateDefaults(); // reset the persona state to the schema defaults
@@ -265,7 +265,7 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
       return t(lang, "mem_add_many", added, dup ? t(lang, "mem_add_dup_suffix", dup) : "") + ragHint;
     }
 
-    if (sub === "list" || sub === "факты") {
+    if (sub === "list" || tList(lang, "mem_sub_list").includes(sub)) {
       const rows = await listMemories(ctx.env, ctx.chatId);
       if (!rows.length) return t(lang, "mem_list_empty") + ragHint;
       // Source icon BEFORE the text: ✍️ — added manually, 🤖 — the bot memorized it itself (auto).
@@ -274,9 +274,10 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
     }
 
     // /memory del <N> — delete a single fact by its number from /memory list (1-based).
-    const delMatch = raw.match(/^(?:del|delete|удали|удалить)\s+(\d+)$/i);
-    if (delMatch) {
-      const n = parseInt(delMatch[1], 10);
+    const delParts = raw.split(/\s+/);
+    const delWords = ["del", "delete", ...tList(lang, "mem_sub_del")];
+    if (delParts.length === 2 && delWords.includes(delParts[0].toLowerCase()) && /^\d+$/.test(delParts[1])) {
+      const n = parseInt(delParts[1], 10);
       const rows = await listMemories(ctx.env, ctx.chatId);
       if (n < 1 || n > rows.length) {
         return t(lang, "mem_del_oor", n, rows.length);
@@ -286,7 +287,7 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
       return t(lang, "mem_del_ok", n, m.text);
     }
 
-    if (sub === "dedupe" || sub === "повторы") {
+    if (sub === "dedupe" || tList(lang, "mem_sub_dedupe").includes(sub)) {
       const removed = await dedupeChatHistory(ctx);
       if (!removed) return t(lang, "mem_dedupe_none");
       return t(lang, "mem_dedupe_ok", removed);

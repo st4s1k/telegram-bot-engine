@@ -159,6 +159,15 @@ describe("parseConfigValue", () => {
     assert.equal(parseConfigValue(bool, "maybe").ok, false);
   });
 
+  test("value aliases are locale-specific (RU aliases only under ru)", () => {
+    assert.deepEqual(parseConfigValue(bool, "вкл", "ru"), { ok: true, value: true });
+    assert.equal(parseConfigValue(bool, "вкл", "en").ok, false);          // RU bool-alias rejected in en
+    assert.deepEqual(parseConfigValue(bool, "on", "en"), { ok: true, value: true }); // universal works everywhere
+    assert.deepEqual(parseConfigValue(str, "сброс", "ru"), { ok: true, value: "" });  // RU reset-alias → reset
+    assert.equal(parseConfigValue(str, "сброс", "en").value, "сброс");    // in en it is just a literal value
+    assert.deepEqual(parseConfigValue(str, "reset", "en"), { ok: true, value: "" });  // universal reset everywhere
+  });
+
   test("float: диапазон 0..1", () => {
     assert.deepEqual(parseConfigValue(flt, "0.5"), { ok: true, value: 0.5 });
     assert.equal(parseConfigValue(flt, "1.5").ok, false);

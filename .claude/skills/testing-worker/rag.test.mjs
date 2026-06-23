@@ -355,4 +355,12 @@ describe("parseExtractedFacts", () => {
   test("не дропает факт, начинающийся с «Вот» без двоеточия", () => {
     assert.deepEqual(parseExtractedFacts("Вот его зовут Стас"), ["Вот его зовут Стас"]);
   });
+  test("refusal markers are locale-aware (lang param)", () => {
+    // Universal English forms filtered regardless of lang:
+    assert.deepEqual(parseExtractedFacts("No facts.", [], "en"), []);
+    assert.deepEqual(parseExtractedFacts("none", [], "en"), []);
+    // RU markers live in the ru locale: filtered under ru, NOT under en (proves locale-specificity).
+    assert.deepEqual(parseExtractedFacts("ничего не нашёл", [], "ru"), []);
+    assert.deepEqual(parseExtractedFacts("ничего полезного", [], "en"), ["ничего полезного"]);
+  });
 });

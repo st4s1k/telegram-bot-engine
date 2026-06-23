@@ -4,7 +4,7 @@
 // keys and their validation. The help/status/config-reference builders also live here.
 
 import { escapeRegExp, historyChars } from "./utils";
-import { t } from "./i18n";
+import { t, tList } from "./i18n";
 import { saveChatConfig } from "./storage";
 import { getPersona, getPersonaConfig, getAllCommands, getPersonaTexts } from "./persona/registry";
 import type { BotConfig, ChatConfig, CmdRegexEntry, ConfigMeta, Ctx, Env } from "./types";
@@ -77,6 +77,7 @@ export function getGlobalConfig(env: Env): BotConfig {
   const num = (v: unknown, d: number): number => Number.isFinite(Number(v)) ? Number(v) : d;
   const bool = (v: unknown): boolean => ["1", "true", "yes", "on"].includes(String(v || "").toLowerCase());
   const botUsername = (env.BOT_USERNAME || "bot").toLowerCase();
+  const lang = String(env.BOT_LANG || "ru").toLowerCase(); // UI language (ru/en); per-chat via /config lang
 
   const cfg: BotConfig = {
     // System
@@ -110,7 +111,7 @@ export function getGlobalConfig(env: Env): BotConfig {
     adminUsernames: String(env.ADMIN_USERNAMES || "")
       .toLowerCase().split(",").map(s => s.trim()).filter(Boolean),
     llmLog: bool(env.LLM_LOG),
-    lang: String(env.BOT_LANG || "ru").toLowerCase(), // language of the engine's UI strings (ru/en), per-chat via /config lang
+    lang, // language of the engine's UI strings (ru/en), per-chat via /config lang
     // IANA timezone for history timestamps and the daily-summary cron gate. Default UTC. Deployment-wide
     // (env only, not per-chat): the cron schedule in wrangler.jsonc is chosen to align with this TZ + the 08:00 gate.
     timezone: String(env.BOT_TZ || "UTC").trim() || "UTC",
@@ -133,9 +134,10 @@ export function getGlobalConfig(env: Env): BotConfig {
     visionDetail: ["low", "high"].includes(String(env.VISION_DETAIL || "").toLowerCase())
       ? String(env.VISION_DETAIL).toLowerCase()
       : "low",
-    // Words in a photo caption that bump the detail to high for that photo.
-    visionHdWords: String(env.VISION_HD_WORDS || "присмотрись")
-      .toLowerCase().split(",").map(s => s.trim()).filter(Boolean),
+    // Caption words that bump the vision detail to high. Default from the active locale
+    // (vision_hd_default) — the engine carries no hardcoded language; a deployment overrides via env.
+    visionHdWords: (env.VISION_HD_WORDS ? String(env.VISION_HD_WORDS).split(",") : tList(lang, "vision_hd_default"))
+      .map(s => s.trim().toLowerCase()).filter(Boolean),
 
     _cmdRegex: buildCommandRegex(env, botUsername),
     // Persona defaults: switches + probabilities (*_prob) from the pack. Read dynamically via cfg[key].
@@ -197,8 +199,8 @@ export function mergeConfig(globalCfg: BotConfig, chatOverrides: ChatConfig | nu
 export function parseConfigValue(meta: ConfigMeta, rawVal: string, lang: string = "ru"): ConfigParseResult {
   if (meta.type === "bool") {
     const v = (rawVal || "").toLowerCase();
-    if (["on", "true", "1", "yes", "вкл"].includes(v)) return { ok: true, value: true };
-    if (["off", "false", "0", "no", "выкл"].includes(v)) return { ok: true, value: false };
+    if (["on", "true", "1", "yes"].includes(v) || tList(lang, "cfg_true_words").includes(v)) return { ok: true, value: true };
+    if (["off", "false", "0", "no"].includes(v) || tList(lang, "cfg_false_words").includes(v)) return { ok: true, value: false };
     return { ok: false, error: t(lang, "cfg_err_bool") };
   }
   if (meta.type === "float") {
@@ -220,7 +222,7 @@ export function parseConfigValue(meta: ConfigMeta, rawVal: string, lang: string 
   if (meta.type === "string") {
     const v = (rawVal || "").trim();
     // reset/off/«-» → reset to default (empty string = taken from env).
-    if (["reset", "off", "default", "-", "сброс"].includes(v.toLowerCase())) {
+    if (["reset", "off", "default", "-"].includes(v.toLowerCase()) || tList(lang, "cfg_reset_words").includes(v.toLowerCase())) {
       return { ok: true, value: "" };
     }
     if (!v) return { ok: false, error: t(lang, "cfg_err_empty") };

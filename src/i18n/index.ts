@@ -23,3 +23,14 @@ export function t(lang: string, key: string, ...args: (string | number | boolean
   for (let i = 0; i < args.length; i++) s = s.split(`{${i}}`).join(String(args[i]));
   return s;
 }
+
+// Raw locale value as a list of words — for INPUT-matching vocabularies (config value aliases, command
+// sub-aliases, fact-refusal markers) that must not be hardcoded in the engine. Unlike t(): no join, and
+// NO fallback to DEFAULT_LANG (a missing key → [], so an unknown locale gets no aliases rather than the
+// default language's). The universal/English tokens stay in code; these are the per-language extras.
+export function tList(lang: string, key: string): string[] {
+  const raw = MESSAGES[lang]?.[key];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === "string" && raw) return [raw];
+  return [];
+}

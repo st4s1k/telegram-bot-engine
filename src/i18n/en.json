@@ -226,5 +226,7 @@
   "vis_album_desc_capt": "{0} (caption: {1})",
   "vis_photo_desc": "[photo: {0}]",
   "vis_runvision_capt": "The photo has a caption: \"{0}\". Describe the photo and reply.",
-  "vis_runvision": "Describe the photo and reply."
+  "vis_runvision": "Describe the photo and reply.",
+
+  "vision_hd_default": ["zoom"]
 }

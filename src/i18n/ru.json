@@ -226,5 +226,17 @@
   "vis_album_desc_capt": "{0} (подпись: {1})",
   "vis_photo_desc": "[фото: {0}]",
   "vis_runvision_capt": "На фото есть подпись: \"{0}\". Опиши фото и ответь.",
-  "vis_runvision": "Опиши фото и ответь."
+  "vis_runvision": "Опиши фото и ответь.",
+
+  "cfg_true_words": ["вкл"],
+  "cfg_false_words": ["выкл"],
+  "cfg_reset_words": ["сброс"],
+  "cmd_preset_aliases": ["режим"],
+  "mem_sub_forget": ["стереть", "забыть"],
+  "mem_sub_list": ["факты"],
+  "mem_sub_del": ["удали", "удалить"],
+  "mem_sub_dedupe": ["повторы"],
+  "mem_refusal_starts": ["нет", "ничего", "нечего"],
+  "mem_refusal_contains": ["фактов нет", "нет фактов"],
+  "vision_hd_default": ["присмотрись"]
 }

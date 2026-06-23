@@ -8,16 +8,18 @@ import { messagesSince, addMemory, listMemories } from "./storage";
 import { runLLMWithHistory } from "./llm";
 import { buildMemoryExtractionPrompt } from "./prompts";
 import { isFallbackMessage } from "./utils";
-import { t } from "./i18n";
+import { t, tList, DEFAULT_LANG } from "./i18n";
 import type { Ctx } from "./types";
 
 // Parse the fact extractor's output: line by line, strip markers/numbering, drop empty lines/preamble,
 // truncate length, dedup against already-known facts (normalized) and within the batch, cap the count.
-// "Nothing"-style replies are matched at the line start (\b does not work after Cyrillic → match start/substring).
-const MEM_NOTHING_RE = /^(нет|ничего|нечего)(\s|$)/;
-export function parseExtractedFacts(out: string, existing: string[] = []): string[] {
+export function parseExtractedFacts(out: string, existing: string[] = [], lang: string = DEFAULT_LANG): string[] {
   const seen = new Set(existing.map(f => f.trim().toLowerCase()));
   const facts: string[] = [];
+  // Locale-specific "no facts" refusal markers (kept out of the engine code): short words matched at the
+  // START (a fact may legitimately CONTAIN such a word mid-sentence) + whole phrases matched anywhere.
+  const refusalStarts = tList(lang, "mem_refusal_starts");
+  const refusalContains = tList(lang, "mem_refusal_contains");
   for (const rawLine of String(out ?? "").split("\n")) {
     // Strip ONLY a real list marker: a bullet or a short ordinal with a delimiter.
     // `1990` is NOT a marker (no delimiter after the digits) → do not mangle a fact starting with a number.
@@ -25,9 +27,10 @@ export function parseExtractedFacts(out: string, existing: string[] = []): strin
     if (!line) continue;
     if (line.endsWith(":")) continue; // heading line (e.g. "Here are facts:", "Extracted facts:" …)
     const norm = line.toLowerCase().replace(/[.!?]+$/, "").trim();
-    // Model "no facts" refusals (the regex below matches the Russian and English forms).
-    if (MEM_NOTHING_RE.test(norm) || /(фактов нет|нет фактов|no facts)/.test(norm)
-        || ["none", "empty", "n/a"].includes(norm)) continue;
+    // Refusals: locale markers (start-anchored words + whole phrases) + universal English/abbrev forms.
+    if (refusalStarts.some(w => norm === w || norm.startsWith(w + " "))
+        || refusalContains.some(w => norm.includes(w))
+        || norm.includes("no facts") || ["none", "empty", "n/a"].includes(norm)) continue;
     line = line.slice(0, MEM_MAX_FACT_CHARS);
     const key = line.toLowerCase();
     if (seen.has(key)) continue; // dedup against known facts and within the batch
@@ -63,7 +66,7 @@ export async function runMemoryCuration(ctx: Ctx): Promise<void> {
     if (isFallbackMessage(out)) return; // LLM error/timeout → don't advance the boundary (retried on the next reply)
     // Dedup is best-effort in-process (against existing + within the batch). A rare race-condition duplicate on
     // parallel webhooks is possible but harmless (cleared by /memory forget, filtered out at recall).
-    for (const fact of parseExtractedFacts(out, existing)) {
+    for (const fact of parseExtractedFacts(out, existing, ctx.cfg.lang)) {
       await addMemory(ctx, fact, "auto");
     }
     ctx.chatData._memUptoId = maxId; // success (even 0 facts) → don't reprocess this slice
