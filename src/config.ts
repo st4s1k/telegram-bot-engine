@@ -77,7 +77,7 @@ export function getGlobalConfig(env: Env): BotConfig {
   const num = (v: unknown, d: number): number => Number.isFinite(Number(v)) ? Number(v) : d;
   const bool = (v: unknown): boolean => ["1", "true", "yes", "on"].includes(String(v || "").toLowerCase());
   const botUsername = (env.BOT_USERNAME || "bot").toLowerCase();
-  const lang = String(env.BOT_LANG || "ru").toLowerCase(); // UI language (ru/en); per-chat via /config lang
+  const lang = String(env.BOT_LANG || "en").toLowerCase(); // UI language; default en, per-chat via /config lang
 
   const cfg: BotConfig = {
     // System

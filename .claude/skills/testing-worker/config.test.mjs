@@ -49,6 +49,12 @@ describe("getGlobalConfig", () => {
     assert.deepEqual(cfg.visionHdWords, ["присмотрись"]);
   });
 
+  test("language default: makeEnv is ru (test deployment); unset BOT_LANG → en (engine default)", () => {
+    assert.equal(getGlobalConfig(makeEnv()).lang, "ru");                        // reference test deployment
+    assert.equal(getGlobalConfig(makeEnv({ BOT_LANG: undefined })).lang, "en"); // engine default = English
+    assert.deepEqual(getGlobalConfig(makeEnv({ BOT_LANG: undefined })).visionHdWords, ["zoom"]); // en locale default
+  });
+
   test("env parsing: bool/number/vision/reasoning/detail/hd-words", () => {
     const cfg = getGlobalConfig(makeEnv({
       ENABLE_VISION: "true",

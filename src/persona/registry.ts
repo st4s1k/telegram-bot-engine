@@ -6,6 +6,7 @@
 // can be moved into a private repo). The contract grows over the course of Phase 1 (texts → prompts → commands …).
 
 import type { Ctx, CommandMode, ChatConfig, ConfigMeta, Env } from "../types";
+import { addLocaleStrings } from "../i18n";
 
 // The persona's contribution to config: its own schema keys (switches/probabilities), presets, and defaults for those keys.
 // The engine merges them: CONFIG_SCHEMA/CONFIG_PRESETS/CONFIG_GROUPS = engine-base ∪ persona;
@@ -89,6 +90,10 @@ export interface PersonaPack {
   /** optional text overrides per locale (key = lang); a missing field is taken from texts.
    *  This lets the pack speak several languages; `/config lang` selects the locale. */
   localeTexts?: Record<string, Partial<PersonaTexts>>;
+  /** optional per-locale string tables (key = lang → key → string/lines) merged into the engine i18n on
+   *  registration. Use this to localize the pack's `/config` descriptions and group titles: give them as
+   *  locale KEYS in `config.schema[k].desc` / `config.groups`, and supply the translations here. */
+  locales?: Record<string, Record<string, string | string[]>>;
   commands?: RegisteredCommand[];
   quickReplies?: QuickReplyRule[];
   randomThrows?: RandomThrowKind[];
@@ -109,7 +114,12 @@ const NEUTRAL: PersonaPack = {
 
 let active: PersonaPack = NEUTRAL;
 
-export function setPersona(pack: PersonaPack): void { active = pack; }
+export function setPersona(pack: PersonaPack): void {
+  active = pack;
+  // Merge the pack's per-locale string tables into the engine i18n so its config descs/group titles
+  // (given as locale keys) resolve through t() like engine keys.
+  for (const [lang, table] of Object.entries(pack.locales || {})) addLocaleStrings(lang, table);
+}
 export function getPersona(): PersonaPack { return active; }
 
 // Persona texts for a locale: the pack's default texts, overridden by the locale overrides (a missing

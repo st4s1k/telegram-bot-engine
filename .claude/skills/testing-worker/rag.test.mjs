@@ -331,7 +331,7 @@ describe("Memory · /memory forget", () => {
 describe("parseExtractedFacts", () => {
   test("strips markers/numbering, cuts the preamble and empties", () => {
     assert.deepEqual(parseExtractedFacts("- факт1\n2. факт2\n\nфакт3"), ["факт1", "факт2", "факт3"]);
-    assert.deepEqual(parseExtractedFacts("Вот факты:\n- альфа\nнет"), ["альфа"]);
+    assert.deepEqual(parseExtractedFacts("Вот факты:\n- альфа\nнет", [], "ru"), ["альфа"]);
     assert.deepEqual(parseExtractedFacts(""), []);
   });
   test("dedup normalized + against existing ones", () => {
@@ -348,9 +348,9 @@ describe("parseExtractedFacts", () => {
   });
   test("filters out various forms of refusals and headings", () => {
     assert.deepEqual(parseExtractedFacts("Извлечённые факты:\n- альфа"), ["альфа"]);
-    assert.deepEqual(parseExtractedFacts("новых фактов нет"), []);
-    assert.deepEqual(parseExtractedFacts("устойчивых фактов нет"), []);
-    assert.deepEqual(parseExtractedFacts("ничего не нашёл"), []);
+    assert.deepEqual(parseExtractedFacts("новых фактов нет", [], "ru"), []);
+    assert.deepEqual(parseExtractedFacts("устойчивых фактов нет", [], "ru"), []);
+    assert.deepEqual(parseExtractedFacts("ничего не нашёл", [], "ru"), []);
   });
   test("doesn't drop a fact starting with «Вот» without a colon", () => {
     assert.deepEqual(parseExtractedFacts("Вот его зовут Стас"), ["Вот его зовут Стас"]);

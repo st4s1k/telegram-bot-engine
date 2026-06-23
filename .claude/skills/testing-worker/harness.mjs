@@ -34,12 +34,11 @@ export * from "../../../src/index.ts";
 export { default as WORKER } from "../../../src/index.ts";
 // The engine (src/index.ts) is persona-free — the harness does not re-export pack content. Persona-specific
 // tests (which live in the pack repo and are staged alongside) import pack symbols directly from src/persona/_pack/.
-// The engine no longer exports fallback strings as constants — they live in the ACTIVE persona. We take them from
-// the registry, RESOLVED for the default language (getPersonaTexts(DEFAULT_LANG)) — exactly what
-// callOpenRouter returns at the default cfg.lang. Without localeTexts (neutral/fasol) this matches the base
-// texts; with a multilingual pack (like the demo) the default locale is taken, and the tests do not fail.
-export const FALLBACK_LLM_ERROR = W.getPersonaTexts(W.DEFAULT_LANG).fallbackError;
-export const FALLBACK_NO_CREDITS = W.getPersonaTexts(W.DEFAULT_LANG).fallbackNoCredits;
+// The engine no longer exports fallback strings as constants — they live in the ACTIVE persona. The
+// reference test deployment runs in Russian (makeEnv defaults BOT_LANG="ru", like the «Фасол» bot), so we
+// resolve the fallbacks at "ru" — exactly what callOpenRouter returns at the default test cfg.lang.
+export const FALLBACK_LLM_ERROR = W.getPersonaTexts("ru").fallbackError;
+export const FALLBACK_NO_CREDITS = W.getPersonaTexts("ru").fallbackNoCredits;
 
 // --- console: silence the worker's expected noise, collect it into a buffer for checks ---
 export const CONSOLE = { log: [], warn: [], error: [] };
@@ -331,6 +330,7 @@ export function makeEnv(over = {}, kvInit = {}, kvOpts = {}) {
     BOT_USERNAME: "testbot",
     BOT_NAME: "Bot",
     ADMIN_USERNAMES: "admin", // the engine doesn't hardcode a default admin; we set a generic one in the test env
+    BOT_LANG: "ru", // reference test deployment runs in Russian (like the «Фасол» bot); the en default is covered separately
     ...over,
   };
   env._kv = kv;
