@@ -34,10 +34,12 @@ export * from "../../../src/index.ts";
 export { default as WORKER } from "../../../src/index.ts";
 // Движок (src/index.ts) persona-free — харнесс не реэкспортит контент пака. Persona-специфичные
 // тесты (живут в репо пака, стейджятся рядом) импортят символы пака напрямую из src/persona/_pack/.
-// Фолбэк-строки движок больше не экспортит как константы — они в АКТИВНОЙ персоне. Отдаём их из
-// реестра (в движке — нейтральные), чтобы движковые тесты сверяли вывод с тем же источником.
-export const FALLBACK_LLM_ERROR = W.getPersona().texts.fallbackError;
-export const FALLBACK_NO_CREDITS = W.getPersona().texts.fallbackNoCredits;
+// Фолбэк-строки движок больше не экспортит как константы — они в АКТИВНОЙ персоне. Берём их из
+// реестра, РАЗРЕШЁННЫЕ для языка по умолчанию (getPersonaTexts(DEFAULT_LANG)) — ровно то, что вернёт
+// callOpenRouter при cfg.lang по умолчанию. Без localeTexts (нейтраль/fasol) это совпадает с базовыми
+// текстами; с мультиязычным паком (как демо) — берётся локаль по умолчанию, и тесты не падают.
+export const FALLBACK_LLM_ERROR = W.getPersonaTexts(W.DEFAULT_LANG).fallbackError;
+export const FALLBACK_NO_CREDITS = W.getPersonaTexts(W.DEFAULT_LANG).fallbackNoCredits;
 
 // --- console: глушим ожидаемый шум воркера, складываем в буфер для проверок ---
 export const CONSOLE = { log: [], warn: [], error: [] };
