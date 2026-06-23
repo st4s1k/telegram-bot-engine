@@ -49,7 +49,7 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
       const name = cmdVal.trim().toLowerCase();
       if (!name) {
         return [t(lang, "cfg_preset_header"),
-          ...Object.entries(CONFIG_PRESETS).map(([n, p]) => `• \`${n}\` — ${p.desc}`),
+          ...Object.entries(CONFIG_PRESETS).map(([n, p]) => `• \`${n}\` — ${t(lang, p.desc)}`),
         ].join("\n");
       }
       const canon = CONFIG_PRESETS[name] ? name : CONFIG_PRESET_ALIASES[name];
@@ -58,7 +58,7 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
         return t(lang, "cfg_preset_notfound", name, Object.keys(CONFIG_PRESETS).map(n => `\`${n}\``).join(", "));
       }
       saveChatConfig(ctx, { ...ctx.chatData.config, ...preset.config });
-      return t(lang, "cfg_preset_applied", canon, preset.desc);
+      return t(lang, "cfg_preset_applied", canon, t(lang, preset.desc));
     }
 
     if (!CONFIG_SCHEMA[key]) {
