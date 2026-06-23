@@ -59,10 +59,9 @@ const ENGINE_CONFIG_GROUPS: Record<string, string[]> = {
 };
 export const CONFIG_GROUPS: Record<string, string[]> = { ...ENGINE_CONFIG_GROUPS, ...(getPersonaConfig().groups || {}) };
 
-// Config presets (modes) and their aliases are persona content (switch bundles); they live in the persona pack,
-// the engine just exposes them (engine-base empty ∪ pack). `/config preset <name>` applies one in a single step.
+// Config presets (modes) are persona content (switch bundles); they live in the persona pack, the engine
+// just exposes them (engine-base empty ∪ pack). `/config preset <name>` applies one in a single step.
 export const CONFIG_PRESETS: Record<string, { desc: string; config: ChatConfig }> = { ...(getPersonaConfig().presets || {}) };
-export const CONFIG_PRESET_ALIASES: Record<string, string> = { ...(getPersonaConfig().presetAliases || {}) };
 
 // The env-derived config is immutable for the lifetime of the isolate (env does not change between requests),
 // so we memoize by env identity (WeakMap → we don't keep env alive). This avoids the CSV splits

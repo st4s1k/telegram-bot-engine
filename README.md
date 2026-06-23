@@ -37,13 +37,14 @@ names are fixed by the engine/pack (there is no env-based renaming).
 
 | Command | What it does |
 |---|---|
-| `/help` | Command list (the text is supplied by the active persona pack). |
+| `/help` | Command list: the engine renders its base list and **appends** the active pack's help section below it. |
 | `/info` | Chat status: role, active model, history size, number of custom settings. |
 | `/summary` | Incremental "what's new" LLM digest since the last call (needs a few new messages). |
 | `/rp` `<description>` / `off` / — | Set / clear / show the chat role. |
 | `/config` `[key value]` / `reset` | Show or change chat settings (see [keys](#config-keys)). |
 | `/model` `[id]` / `vision <id>` / `summary <id>` / `reset` | Model(s), price, balance; switch/reset. |
 | `/memory` `add` / `list` / `del N` / `forget` / `dedupe` / `size_chars N` | Long-term memory + history. |
+| `/lang` `[code]` / — | Show the current UI language + available locales, or switch (unknown code is rejected). |
 | `/stop` · `/resume` | Pause (commands only) and resume. |
 
 > `/admin` is a **hidden** command (only usernames in `ADMIN_USERNAMES`, private chats only): inspect
@@ -60,13 +61,21 @@ through the registry `src/persona/registry.ts` (`setPersona`/`getPersona` + gett
 
 | Part | What it provides |
 |---|---|
-| `texts` | default voice, language line, fallback strings, wake-words, username aliases, `/help`, `/info` title |
-| `localeTexts` | optional per-language overrides of `texts` (so a pack can speak more than one language) |
+| `wakeWords` | words that wake the bot in groups (substring, any case) — the pack's only non-localized text |
+| `usernameAliases` | `username (lowercase, no @) → display name` overrides |
 | `commands` | extra commands (`{type, defaultCmd, handler, llm?, skipHistory?, state?}`) |
 | `quickReplies` | trigger replies (substring / token table, gated by `cfgFlag`×`probKey`) |
 | `randomThrows` | random "throws" (weighted pick) |
 | `config` | own schema keys, groups, presets, defaults (`defaults(env)`) |
 | `buildPromptLines` / `infoLines` / `adminFlags` | optional hooks: extra system-prompt / `/info` / `/admin` lines derived from the pack's own state |
+
+All fields are **optional** (the neutral pack is `{}`). The pack's **localized** strings — the former
+`PersonaTexts` (default voice, language line, fallback strings, `/help` text, `/info` title) plus its
+`/config` descriptions / group titles / preset descriptions — live in the **pack's own
+`i18n/<lang>.json` folder** (discovered and merged into the engine i18n by the same generate step; see
+[Localization](#localization)), not on the pack object. The `PersonaTexts` fields are stored under
+`persona_*` keys (`persona_defaultVoice`, `persona_helpText`, `persona_infoTitle`, …);
+`getPersonaTexts(lang)` rebuilds them per call via `t()` with neutral defaults.
 
 A command may declare a `state` slice — a piece of the generic per-chat **`personaState`** JSON slot
 whose schema the persona defines. The engine merges the defaults from all commands' `state` slices and
@@ -98,15 +107,31 @@ own `PERSONA_PACK`.
 
 ## Localization
 
-UI strings are externalized to JSON locale files (`src/i18n/{ru,en}.json`) and resolved through
-`t(lang, key, ...args)` (`src/i18n/index.ts`). A value is a string or an array of lines. The default
-language is `ru` (env `BOT_LANG`) and falls back to `ru` for missing keys.
+UI strings are externalized to JSON locale files in `src/i18n/` and resolved through
+`t(lang, key, ...args)` (`src/i18n/index.ts`). A value is a string or an array of lines (joined with
+`\n`); `{0}`/`{1}` are positional args; a missing key falls back to the default language and then to the
+key itself. The default UI language is **English** (`DEFAULT_LANG = "en"`, env `BOT_LANG`, default `en`)
+— a localized deployment opts in by setting `BOT_LANG` (e.g. a Russian deployment sets `BOT_LANG=ru`).
+`tList(lang, key)` returns a raw array (no fallback) for input-matching vocabularies; `tRaw(lang, key)`
+returns a single string or `undefined` (with lang→default fallback).
 
-- **Per chat:** `/config lang ru|en` overrides the language for that chat.
-- **Persona texts** are localized separately by the pack via `localeTexts` (so the personality can be
-  multilingual independently of the engine UI language).
+- **Per chat:** `/lang <code>` or `/config lang <code>` overrides the language for that chat; an unknown
+  code is **rejected** (the language stays unchanged), not silently accepted.
+- **Persona texts** are localized in the **pack's own `i18n/<lang>.json` folder** (merged into the engine
+  i18n by the generate step), so the personality is multilingual independently of the engine UI language.
 
-Adding a language = add a `src/i18n/<lang>.json` and register it in `src/i18n/index.ts`.
+**Locales are discovered from the folders — the code hardcodes no language list.**
+`scripts/select-persona.mjs` scans `src/i18n/*.json` (engine) and the staged pack's
+`src/persona/_pack/i18n/*.json` (persona) and generates the **gitignored** `src/i18n/_generated.ts`, a
+static import manifest (Cloudflare Workers have no runtime fs, so locales are baked in at generate time).
+The filename minus `.json` is the locale code, and `LOCALES = Object.keys(MESSAGES)` (engine ∪ persona
+tables merged per locale). **Adding a language = drop a `src/i18n/<code>.json` file** — `<code>` is then
+immediately usable via `/lang <code>` or `/config lang <code>` with no code change and no manual
+registration.
+
+> A pack's **displayed** command/status output is localized via `t()` from its `i18n/<lang>.json`;
+> its **model-input** strings (prompt-builder instructions, prompt seeds, flavor arrays injected into the
+> system prompt) stay inline in the pack code, since they shape the reply rather than being shown.
 
 ## When the bot replies on its own
 
@@ -124,7 +149,7 @@ Adding a language = add a `src/i18n/<lang>.json` and register it in `src/i18n/in
 - **D1** (`DB`) — primary store: one state row per chat + one row per message.
 - **Vectorize** + **Workers AI** — long-term memory (RAG, curated facts).
 - **KV** (`KV`) — technical update-dedup flags (`dedup:*`).
-- **Vitest** — offline tests (~308 neutral / ~359 with a pack) on a real D1 (`node:sqlite` shim) +
+- **Vitest** — offline tests (~312 neutral / ~360 with a pack) on a real D1 (`node:sqlite` shim) +
   mocked `fetch` / SSE / AI / Vectorize.
 
 ## Layout (`src/`)
@@ -135,7 +160,7 @@ Typed ES-modules, layered bottom-up (each imports only from lower layers; no cyc
 |---|---|
 | `types.ts` | shared domain types |
 | `constants.ts` | limits, timeouts, delimiters |
-| `i18n/` | locale files (`ru.json`/`en.json`) + the `t()` resolver |
+| `i18n/` | locale JSON files (folder-discovered) + the `t()`/`tList`/`tRaw` resolver |
 | `utils.ts` | pure helpers: `makeCtx`, `shouldAnswer`, visual/parsing/name helpers, time formatters |
 | `prompts.ts` | system-prompt assembly (engine builders: default/reply/vision) |
 | `rag.ts` | Vectorize/Workers AI: embed/upsert/query/delete |
@@ -158,7 +183,7 @@ registers them via `setEngineCommands`, and `getAllCommands()` = engine ∪ pers
 
 ```bash
 npm install
-npm test                          # vitest run — offline, neutral pack (~308 core tests)
+npm test                          # vitest run — offline, neutral pack (~312 core tests)
 PERSONA_PACK=../my-pack npm test  # with a pack (+ copy its tests/*.persona.test.mjs next to the core tests)
 npm run typecheck                 # tsc --noEmit (strict); npm run check is an alias
 npm run dev                       # wrangler dev — local run
@@ -189,7 +214,7 @@ Engine env vars live in the deployment's `wrangler.jsonc` → `vars` (all option
 models (`OPENROUTER_MODEL`/`OPENROUTER_VISION_MODEL`/`OPENROUTER_SUMMARY_MODEL`/`OPENROUTER_HOST`/`OPENROUTER_TITLE`),
 `MAX_HISTORY_CHARS`, `MAX_TOKENS`, `ANSWER_PROB`, `ENABLE_VISION`, `ENABLE_REASONING`, `VISION_DETAIL`,
 `VISION_HD_WORDS`, `ENABLE_RAG`, `RAG_TOP_K`, `RAG_MIN_SCORE`, `BOT_NAME`/`BOT_USERNAME`,
-`BOT_LANG` (UI language, default `ru`), `BOT_TZ` (IANA timezone for history timestamps and the
+`BOT_LANG` (UI language, default `en`), `BOT_TZ` (IANA timezone for history timestamps and the
 daily-summary cron gate, default `UTC`), `ADMIN_USERNAMES`, `ADMIN_CHAT_IDS`, `LLM_LOG`. Persona env
 (switches/probabilities) is set by the pack.
 
@@ -208,7 +233,7 @@ Configured **per chat** (`/config <key> <value>`). Booleans — `on`/`off`; prob
 | `vision` | bool | Look at sent photos/stickers |
 | `rag` · `rag_top_k` · `rag_min_score` | bool/int/float | Long-term memory: on, how many facts, similarity threshold |
 | `daily_summary` | bool | Daily summary at 08:00 (in the configured `BOT_TZ`, default UTC) |
-| `lang` | string | UI language for this chat (`ru`/`en`) |
+| `lang` | string | UI language for this chat — any discovered locale; an unknown code is rejected |
 
 Fun keys (triggers/throws/their probabilities) are added by the persona pack — see its repo. The
 timezone is deployment-wide (`BOT_TZ` env), not a per-chat key.

@@ -11,7 +11,7 @@ import {
   getChatData, flushChatData, saveChatConfig, setPaused, setRole,
   clearChatHistory, dedupeChatHistory, addMemory, listMemories, clearMemories, deleteMemory, parseJson, messageStats,
 } from "./storage";
-import { CONFIG_SCHEMA, CONFIG_PRESETS, CONFIG_PRESET_ALIASES, getGlobalConfig, mergeConfig, buildHelp, buildConfigHelp, buildInfoStatus, setConfigParam } from "./config";
+import { CONFIG_SCHEMA, CONFIG_PRESETS, getGlobalConfig, mergeConfig, buildHelp, buildConfigHelp, buildInfoStatus, setConfigParam } from "./config";
 import { fetchModelPrice, fetchOpenRouterUsage } from "./llm";
 import { sendTyping, sendAndStore } from "./telegram";
 import { runIncrementalSummary } from "./summary";
@@ -52,13 +52,12 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
           ...Object.entries(CONFIG_PRESETS).map(([n, p]) => `• \`${n}\` — ${t(lang, p.desc)}`),
         ].join("\n");
       }
-      const canon = CONFIG_PRESETS[name] ? name : CONFIG_PRESET_ALIASES[name];
-      const preset = canon ? CONFIG_PRESETS[canon] : undefined;
+      const preset = CONFIG_PRESETS[name];
       if (!preset) {
         return t(lang, "cfg_preset_notfound", name, Object.keys(CONFIG_PRESETS).map(n => `\`${n}\``).join(", "));
       }
       saveChatConfig(ctx, { ...ctx.chatData.config, ...preset.config });
-      return t(lang, "cfg_preset_applied", canon, t(lang, preset.desc));
+      return t(lang, "cfg_preset_applied", name, t(lang, preset.desc));
     }
 
     if (!CONFIG_SCHEMA[key]) {

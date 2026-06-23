@@ -15,7 +15,6 @@ export interface ConfigContribution {
   schema?: Record<string, ConfigMeta>;
   groups?: Record<string, string[]>;
   presets?: Record<string, { desc: string; config: ChatConfig }>;
-  presetAliases?: Record<string, string>;
   defaults?: (env: Env) => Record<string, boolean | number>;
 }
 
