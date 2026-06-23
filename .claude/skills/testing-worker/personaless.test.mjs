@@ -1,11 +1,17 @@
 import * as H from "./harness.mjs";
 const {
   test, describe, beforeEach, assert,
-  setPersona, getPersona,
+  setPersona, getPersona, getPersonaTexts,
   assemblePrompt, buildHelp, buildInfoStatus, messageMentionsBot, buildCommandRegex,
   COMMANDS, getGlobalConfig, DEFAULT_CHAT_DATA, makeEnv, makeMsg, makeCtxFor,
   seedChat,
 } = H;
+
+// The persona's localized texts are baked into the engine i18n at BUILD time (the generate step), so a
+// runtime setPersona() swap can't neutralize them. The text-neutrality checks below therefore apply only
+// to a NEUTRAL build (no persona i18n staged) — skip them when a pack is staged (e.g. the fasol suite).
+// The pack OBJECT (commands/quick-replies/hooks/wakeWords) IS runtime-swappable, so those checks run always.
+const NEUTRAL_BUILD = !getPersonaTexts("en").defaultVoice;
 
 /* ====================================================================== */
 /* ===== PERSONALESS: the engine under a neutral pack (forkability) ===== */
@@ -17,20 +23,15 @@ const {
 // buildInfoStatus/messageMentionsBot/buildCommandRegex/admin label) read the active pack at call
 // time — those are what we test, swapping the pack for a neutral one (like NEUTRAL in registry.ts / ./default).
 
-const NEUTRAL_PACK = {
-  texts: {
-    defaultVoice: "", languageLine: "",
-    fallbackError: "ошибка, попробуй позже", fallbackNoCredits: "нет кредитов",
-    wakeWords: [], usernameAliases: {}, targetNameFallback: "друг",
-    helpText: "Команды: /help · /config · /info · /model · /memory · /summary · /stop · /resume",
-    infoTitle: "ℹ️ **Статус**", // no infoArousalLabel → no arousal line
-  },
-};
+// New contract: the persona's localized texts come from its i18n folder (discovered + merged). With no
+// persona i18n staged, getPersonaTexts returns the engine's NEUTRAL_TEXTS defaults (empty voice/help,
+// "ℹ️ **Status**" title, English fallbacks). The pack object only carries the non-localized identity.
+const NEUTRAL_PACK = { wakeWords: [], usernameAliases: {} };
 
 describe("personaless (neutral pack)", () => {
   beforeEach(() => { const saved = getPersona(); setPersona(NEUTRAL_PACK); return () => setPersona(saved); });
 
-  test("assemblePrompt without a role: no junk 'ТВОЯ РОЛЬ: \"\"' and no 'undefined'", () => {
+  test.skipIf(!NEUTRAL_BUILD)("assemblePrompt without a role: no junk 'ТВОЯ РОЛЬ: \"\"' and no 'undefined'", () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv(), { ...DEFAULT_CHAT_DATA(), role: null, personaState: { arousal: 3 } });
     const p = assemblePrompt(["Ты отвечаешь на сообщение."], ctx);
     assert.ok(p.includes("Ты отвечаешь на сообщение."));
@@ -51,12 +52,12 @@ describe("personaless (neutral pack)", () => {
     assert.ok(!/анек/i.test(h));
   });
 
-  test("buildInfoStatus: neutral title, no arousal line", () => {
+  test.skipIf(!NEUTRAL_BUILD)("buildInfoStatus: neutral title, no arousal line", () => {
     const env = makeEnv();
     const ctx = makeCtxFor(makeMsg({ chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), personaState: { arousal: 4 } });
     const out = buildInfoStatus(ctx);
-    assert.ok(out.includes("Статус"));       // neutral infoTitle
-    assert.ok(!out.includes("Возбуждение")); // no infoArousalLabel → no line (even when arousal>0)
+    assert.ok(out.includes("Status"));        // neutral infoTitle (NEUTRAL_TEXTS, English)
+    assert.ok(!out.includes("Возбуждение")); // neutral has no infoLines hook → no arousal line (even arousal>0)
   });
 
   test("messageMentionsBot: without wakeWords it reacts only to an @-mention", () => {

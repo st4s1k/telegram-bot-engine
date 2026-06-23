@@ -19,6 +19,14 @@ if (pack && existsSync(pack)) {
   for (const f of readdirSync(pack)) {
     if (f.endsWith(".ts")) { copyFileSync(join(pack, f), join(STAGE, f)); n++; }
   }
+  // Stage the pack's i18n/ folder (its localized strings) → _pack/i18n/, so the manifest below picks it up.
+  const packI18n = join(pack, "i18n");
+  if (existsSync(packI18n)) {
+    mkdirSync(join(STAGE, "i18n"), { recursive: true });
+    for (const f of readdirSync(packI18n)) {
+      if (f.endsWith(".json")) copyFileSync(join(packI18n, f), join(STAGE, "i18n", f));
+    }
+  }
   writeFileSync(ACTIVE, HEAD + 'import "./_pack";\n');
   console.log(`persona: staged ${n} file(s) from ${pack} -> src/persona/_pack`);
 } else {

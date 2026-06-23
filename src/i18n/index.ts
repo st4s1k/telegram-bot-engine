@@ -24,12 +24,13 @@ for (const [lang, table] of Object.entries(PERSONA_TABLES)) MESSAGES[lang] = { .
 // Available UI locales (for /lang validation + listing), derived from the discovered tables.
 export const LOCALES: string[] = Object.keys(MESSAGES);
 
-// Merge a persona's per-locale string table into the engine's locale tables, so persona-supplied keys
-// (config descriptions, group titles, …) resolve through t() exactly like engine keys. Called from
-// setPersona. A persona may introduce a new locale — it is added to LOCALES so `/config lang` accepts it.
-export function addLocaleStrings(lang: string, table: Record<string, string | string[]>): void {
-  MESSAGES[lang] = { ...(MESSAGES[lang] || {}), ...table };
-  if (!LOCALES.includes(lang)) LOCALES.push(lang);
+// Raw lookup of a single string key: the value (array values joined with \n), or undefined if the key is
+// absent in this locale AND in DEFAULT_LANG. Used by getPersonaTexts to read the persona's localized
+// PersonaTexts fields (persona_* keys) from the discovered tables, falling back to a neutral default.
+export function tRaw(lang: string, key: string): string | undefined {
+  const raw = MESSAGES[lang]?.[key] ?? MESSAGES[DEFAULT_LANG]?.[key];
+  if (raw === undefined) return undefined;
+  return Array.isArray(raw) ? raw.join("\n") : raw;
 }
 
 export function t(lang: string, key: string, ...args: (string | number | boolean)[]): string {

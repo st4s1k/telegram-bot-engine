@@ -5,8 +5,8 @@
 // the lower layers (storage/flow/vision), so they can't live in the "heavy" vision layer.
 
 import { ROOTS_LIMIT, REQ_ID_LEN } from "./constants";
-import { getPersona, getAllFallbackTexts } from "./persona/registry";
-import { t } from "./i18n";
+import { getPersona, getPersonaTexts, getAllFallbackTexts } from "./persona/registry";
+import { t, DEFAULT_LANG } from "./i18n";
 import type {
   BotConfig, ChatData, CommandMode, Ctx, Env, HistoryItem, HistoryMeta,
   TgMessage, TgPhotoSize, TgSendResult, TgUser, Visual, VisualKind,
@@ -144,26 +144,28 @@ export function messageMentionsBot(text: string, _msg: TgMessage, cfg: BotConfig
   // "@username" text in the string), so separate parsing of msg.entities isn't needed.
   // wakeWords — words addressing the bot from the persona pack. Substring, any case
   // (the pack itself decides which substrings wake the bot).
-  return s.includes("@" + cfg.botUsername) || getPersona().texts.wakeWords.some(w => s.includes(w));
+  return s.includes("@" + cfg.botUsername) || (getPersona().wakeWords ?? []).some(w => s.includes(w));
 }
 
 // --- User names ---
 
-// The private username→name mapping is persona content, living in the persona pack
-// (src/persona/fasol/texts.ts); read per call via getPersona().texts.usernameAliases.
+// The private username→name mapping is persona identity (non-localized), on the pack object:
+// read per call via getPersona().usernameAliases.
 
 export function resolveUserName(user: TgUser | null | undefined): string | null {
   if (!user) return null;
   const uname = user.username && user.username.toLowerCase();
-  const aliases = getPersona().texts.usernameAliases;
+  const aliases = getPersona().usernameAliases ?? {};
   if (uname && aliases[uname]) return aliases[uname];
   return user.first_name || null;
 }
 
-export function pickTargetName(msg: TgMessage): string {
+// targetNameFallback is localized (a PersonaTexts field) — pass the chat's lang so the placeholder name
+// matches the UI language; defaults to DEFAULT_LANG when a caller has no lang in hand.
+export function pickTargetName(msg: TgMessage, lang: string = DEFAULT_LANG): string {
   return resolveUserName(msg.reply_to_message?.from)
       || resolveUserName(msg.from)
-      || getPersona().texts.targetNameFallback;
+      || getPersonaTexts(lang).targetNameFallback;
 }
 
 export function pickRandomUserText(h: HistoryItem[], bot: string): string {

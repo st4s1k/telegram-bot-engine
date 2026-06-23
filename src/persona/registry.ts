@@ -6,7 +6,7 @@
 // can be moved into a private repo). The contract grows over the course of Phase 1 (texts → prompts → commands …).
 
 import type { Ctx, CommandMode, ChatConfig, ConfigMeta, Env } from "../types";
-import { addLocaleStrings } from "../i18n";
+import { tRaw, LOCALES } from "../i18n";
 
 // The persona's contribution to config: its own schema keys (switches/probabilities), presets, and defaults for those keys.
 // The engine merges them: CONFIG_SCHEMA/CONFIG_PRESETS/CONFIG_GROUPS = engine-base ∪ persona;
@@ -86,14 +86,13 @@ export interface PersonaStateField {
 }
 
 export interface PersonaPack {
-  texts: PersonaTexts;
-  /** optional text overrides per locale (key = lang); a missing field is taken from texts.
-   *  This lets the pack speak several languages; `/config lang` selects the locale. */
-  localeTexts?: Record<string, Partial<PersonaTexts>>;
-  /** optional per-locale string tables (key = lang → key → string/lines) merged into the engine i18n on
-   *  registration. Use this to localize the pack's `/config` descriptions and group titles: give them as
-   *  locale KEYS in `config.schema[k].desc` / `config.groups`, and supply the translations here. */
-  locales?: Record<string, Record<string, string | string[]>>;
+  /** Non-localized persona identity. The LOCALIZED texts — defaultVoice/languageLine/help/fallbacks/info
+   *  title (the PersonaTexts fields) AND the /config descriptions/group titles/preset descriptions — live
+   *  in the pack's i18n/<lang>.json: PersonaTexts fields under `persona_*` keys, config strings under their
+   *  own keys. The generate step (scripts/select-persona.mjs) discovers + merges them into the engine i18n;
+   *  getPersonaTexts reads the persona_* keys per cfg.lang, and t() resolves the config keys. */
+  wakeWords?: string[];
+  usernameAliases?: Record<string, string>;
   commands?: RegisteredCommand[];
   quickReplies?: QuickReplyRule[];
   randomThrows?: RandomThrowKind[];
@@ -106,36 +105,47 @@ export interface PersonaPack {
   adminFlags?: (state: Record<string, unknown>) => string;
 }
 
-// A neutral default — so the engine builds/runs WITHOUT a persona (personaless, for Phase 2).
-// In Phase 1 the pack is always registered before the first call, so this is just a stub.
-const NEUTRAL: PersonaPack = {
-  texts: { defaultVoice: "", languageLine: "", fallbackError: "error, try again later", fallbackNoCredits: "out of credits", wakeWords: [], usernameAliases: {}, targetNameFallback: "friend", helpText: "", infoTitle: "ℹ️ **Status**" },
-};
+// Neutral text defaults — used when no pack supplies a localized value (no persona, or a missing key).
+// The localized PersonaTexts fields live in each pack's i18n/<lang>.json under `persona_<field>` keys.
+const NEUTRAL_TEXTS = {
+  defaultVoice: "", languageLine: "",
+  fallbackError: "error, try again later", fallbackNoCredits: "out of credits",
+  targetNameFallback: "friend", helpText: "", infoTitle: "ℹ️ **Status**",
+} as const;
+
+// A neutral default pack — so the engine builds/runs WITHOUT a persona (personaless).
+const NEUTRAL: PersonaPack = {};
 
 let active: PersonaPack = NEUTRAL;
 
-export function setPersona(pack: PersonaPack): void {
-  active = pack;
-  // Merge the pack's per-locale string tables into the engine i18n so its config descs/group titles
-  // (given as locale keys) resolve through t() like engine keys.
-  for (const [lang, table] of Object.entries(pack.locales || {})) addLocaleStrings(lang, table);
-}
+export function setPersona(pack: PersonaPack): void { active = pack; }
 export function getPersona(): PersonaPack { return active; }
 
-// Persona texts for a locale: the pack's default texts, overridden by the locale overrides (a missing
-// field → default). Without localeTexts (or for an unknown locale) — the pack's default texts.
+// Persona texts for a locale. The localized fields come from the discovered i18n tables (`persona_<field>`
+// keys, with tRaw's lang→DEFAULT_LANG fallback), falling back to the neutral defaults; the non-localized
+// identity (wakeWords/usernameAliases) comes from the active pack object.
 export function getPersonaTexts(lang: string): PersonaTexts {
-  const loc = active.localeTexts?.[lang];
-  return loc ? { ...active.texts, ...loc } : active.texts;
+  const g = (f: keyof typeof NEUTRAL_TEXTS): string => tRaw(lang, "persona_" + f) ?? NEUTRAL_TEXTS[f];
+  return {
+    defaultVoice: g("defaultVoice"),
+    languageLine: g("languageLine"),
+    fallbackError: g("fallbackError"),
+    fallbackNoCredits: g("fallbackNoCredits"),
+    targetNameFallback: g("targetNameFallback"),
+    helpText: g("helpText"),
+    infoTitle: g("infoTitle"),
+    wakeWords: active.wakeWords ?? [],
+    usernameAliases: active.usernameAliases ?? {},
+  };
 }
 
-// All fallback strings across all locales — so that isFallbackMessage does not store them in history
+// All fallback strings across all discovered locales — so isFallbackMessage keeps them out of history
 // regardless of the reply language.
 export function getAllFallbackTexts(): string[] {
-  const out = [active.texts.fallbackError, active.texts.fallbackNoCredits];
-  for (const loc of Object.values(active.localeTexts || {})) {
-    if (loc.fallbackError) out.push(loc.fallbackError);
-    if (loc.fallbackNoCredits) out.push(loc.fallbackNoCredits);
+  const out: string[] = [NEUTRAL_TEXTS.fallbackError, NEUTRAL_TEXTS.fallbackNoCredits];
+  for (const lang of LOCALES) {
+    const e = tRaw(lang, "persona_fallbackError"); if (e) out.push(e);
+    const n = tRaw(lang, "persona_fallbackNoCredits"); if (n) out.push(n);
   }
   return out;
 }
