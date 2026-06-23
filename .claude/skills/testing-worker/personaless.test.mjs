@@ -8,14 +8,14 @@ const {
 } = H;
 
 /* ====================================================================== */
-/* ===== PERSONALESS: движок под нейтральным паком (форкабельность) ===== */
+/* ===== PERSONALESS: the engine under a neutral pack (forkability) ===== */
 /* ====================================================================== */
-// Цель форкабельности (Фаза 2): движок работает БЕЗ персоны. Эагерно-скомпозиченные карты
-// (CONFIG_SCHEMA/CONFIG_GROUPS/COMMANDS) замораживаются на загрузке модуля с активным тогда
-// паком (персона через барель), поэтому их нейтральность здесь не проверить — это сценарий
-// прод-сборки (active.ts → default). Но ПОВЫЗОВНЫЕ читатели персоны (assemblePrompt/buildHelp/
-// buildInfoStatus/messageMentionsBot/buildCommandRegex/админ-лейбл) читают активный пак в момент
-// вызова — их и проверяем, подменив пак на нейтральный (как NEUTRAL в registry.ts / ./default).
+// Forkability goal (Phase 2): the engine works WITHOUT a persona. The eagerly-composed maps
+// (CONFIG_SCHEMA/CONFIG_GROUPS/COMMANDS) are frozen at module load with whatever pack was active
+// then (persona via the barrel), so their neutrality can't be checked here — that's the
+// prod-build scenario (active.ts → default). But the PER-CALL persona readers (assemblePrompt/buildHelp/
+// buildInfoStatus/messageMentionsBot/buildCommandRegex/admin label) read the active pack at call
+// time — those are what we test, swapping the pack for a neutral one (like NEUTRAL in registry.ts / ./default).
 
 const NEUTRAL_PACK = {
   texts: {
@@ -23,63 +23,63 @@ const NEUTRAL_PACK = {
     fallbackError: "ошибка, попробуй позже", fallbackNoCredits: "нет кредитов",
     wakeWords: [], usernameAliases: {}, targetNameFallback: "друг",
     helpText: "Команды: /help · /config · /info · /model · /memory · /summary · /stop · /resume",
-    infoTitle: "ℹ️ **Статус**", // без infoArousalLabel → строки возбуждения нет
+    infoTitle: "ℹ️ **Статус**", // no infoArousalLabel → no arousal line
   },
 };
 
-describe("personaless (нейтральный пак)", () => {
+describe("personaless (neutral pack)", () => {
   beforeEach(() => { const saved = getPersona(); setPersona(NEUTRAL_PACK); return () => setPersona(saved); });
 
-  test("assemblePrompt без роли: нет мусорной 'ТВОЯ РОЛЬ: \"\"' и нет 'undefined'", () => {
+  test("assemblePrompt without a role: no junk 'ТВОЯ РОЛЬ: \"\"' and no 'undefined'", () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv(), { ...DEFAULT_CHAT_DATA(), role: null, personaState: { arousal: 3 } });
     const p = assemblePrompt(["Ты отвечаешь на сообщение."], ctx);
     assert.ok(p.includes("Ты отвечаешь на сообщение."));
-    assert.ok(!p.includes("ТВОЯ РОЛЬ"));            // пустой defaultVoice → строка опущена
-    assert.ok(!p.includes("undefined"));            // нейтральный флейвор пуст → ничего не утекает
-    assert.ok(!p.includes("ФИЗИЧЕСКОЕ СОСТОЯНИЕ")); // нейтральный флейвор пуст → строки нет
+    assert.ok(!p.includes("ТВОЯ РОЛЬ"));            // empty defaultVoice → line is omitted
+    assert.ok(!p.includes("undefined"));            // neutral flavor is empty → nothing leaks
+    assert.ok(!p.includes("ФИЗИЧЕСКОЕ СОСТОЯНИЕ")); // neutral flavor is empty → no line
   });
 
-  test("assemblePrompt с ролью чата: роль работает и без персоны", () => {
+  test("assemblePrompt with a chat role: the role works even without a persona", () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv(), { ...DEFAULT_CHAT_DATA(), role: "вежливый секретарь", personaState: { arousal: 0 } });
     const p = assemblePrompt(["x"], ctx);
     assert.ok(p.includes('ТВОЯ РОЛЬ: "вежливый секретарь"'));
   });
 
-  test("buildHelp: нейтральный текст, без персона-контента", () => {
+  test("buildHelp: neutral text, no persona content", () => {
     const h = buildHelp();
     assert.ok(h.includes("/help"));
     assert.ok(!/анек/i.test(h));
   });
 
-  test("buildInfoStatus: нейтральный заголовок, без строки возбуждения", () => {
+  test("buildInfoStatus: neutral title, no arousal line", () => {
     const env = makeEnv();
     const ctx = makeCtxFor(makeMsg({ chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), personaState: { arousal: 4 } });
     const out = buildInfoStatus(ctx);
-    assert.ok(out.includes("Статус"));       // нейтральный infoTitle
-    assert.ok(!out.includes("Возбуждение")); // нет infoArousalLabel → строки нет (даже при arousal>0)
+    assert.ok(out.includes("Статус"));       // neutral infoTitle
+    assert.ok(!out.includes("Возбуждение")); // no infoArousalLabel → no line (even when arousal>0)
   });
 
-  test("messageMentionsBot: без wakeWords реагирует только на @-упоминание", () => {
+  test("messageMentionsBot: without wakeWords it reacts only to an @-mention", () => {
     const cfg = getGlobalConfig(makeEnv());
     const msg = makeMsg({ chatType: "group" });
-    assert.equal(messageMentionsBot("привет всем", msg, cfg), false);     // нет wake-слов у нейтрали
-    assert.equal(messageMentionsBot("@testbot привет", msg, cfg), true); // @-упоминание всё равно будит
+    assert.equal(messageMentionsBot("привет всем", msg, cfg), false);     // neutral pack has no wake words
+    assert.equal(messageMentionsBot("@testbot привет", msg, cfg), true); // an @-mention still wakes it
   });
 
-  test("buildCommandRegex: без персоны — только команды движка", () => {
+  test("buildCommandRegex: without a persona — only engine commands", () => {
     const types = buildCommandRegex(makeEnv(), "neutral_probe_bot").map((e) => e.type);
     const ENGINE = ["admin", "help", "config", "memory", "model", "summary", "rp", "info", "stop", "resume"];
-    for (const t of ENGINE) assert.ok(types.includes(t), `должна быть команда движка ${t}`);
-    // и НИЧЕГО сверх движка: без зарегистрированной персоны никаких доп. команд не появляется
+    for (const t of ENGINE) assert.ok(types.includes(t), `engine command ${t} must be present`);
+    // and NOTHING beyond the engine: with no registered persona, no extra commands appear
     assert.deepEqual(types.slice().sort(), ENGINE.slice().sort());
   });
 
-  test("admin chat <id>: дамп не светит персона-лейбл возбуждения", async () => {
+  test("admin chat <id>: the dump does not expose the persona arousal label", async () => {
     const env = makeEnv();
     await seedChat(env, -100, { _name: "Группа", personaState: { arousal: 5 } });
     const ctx = makeCtxFor(makeMsg({ username: "admin", chatType: "private" }), env);
     const out = await COMMANDS.admin(ctx, { argText: "chat -100" });
     assert.ok(out.includes("-100"));
-    assert.ok(!out.includes("Возбуждение")); // лейбл из пака (infoArousalLabel), у нейтрали нет
+    assert.ok(!out.includes("Возбуждение")); // label comes from the pack (infoArousalLabel), neutral has none
   });
 });

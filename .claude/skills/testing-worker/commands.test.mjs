@@ -1,7 +1,7 @@
 import * as H from "./harness.mjs";
 const {
   test, describe, assert, WORKER,
-  // worker.js — функции и константы
+  // worker.js — functions and constants
   toMarkdownV2, sendTelegramMessage, sendAndStore, isFallbackMessage,
   dedupeHistory, collapseConsecutiveDuplicates, trimHistoryByChars, historyChars,
   appendHistory, updateHistoryMessage,
@@ -25,7 +25,7 @@ const {
   handleTelegramMessage, COMMANDS, LLM_COMMANDS, TECH_COMMANDS,
   RANDOM_HANDLERS,
   TELEGRAM_MSG_LIMIT, HISTORY_HARD_CAP_ITEMS, FALLBACK_LLM_ERROR, FALLBACK_NO_CREDITS,
-  // харнесс
+  // harness
   makeEnv, makeMsg, makeKV, makeCtxFor, photoSizes, sse, jsonResp, streamResp,
   stubRandom, restoreRandom, CONSOLE, clearConsole, FETCH, newFetch,
   seedChat, dbChat, dbHistory, dbMemories,
@@ -33,11 +33,11 @@ const {
 
 
 /* ====================================================================== */
-/* =====================  ОТДЕЛЬНЫЕ КОМАНДЫ  ========================== */
+/* =====================  INDIVIDUAL COMMANDS  ========================== */
 /* ====================================================================== */
 
 describe("COMMANDS.rp / stop / resume / info", () => {
-  test("rp задаёт/сбрасывает/показывает роль", async () => {
+  test("rp sets/resets/shows the role", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     assert.match(await COMMANDS.rp(ctx, { argText: "ты грубый зек" }), /принята/i);
     assert.equal(ctx.chatData.role, "ты грубый зек");
@@ -45,14 +45,14 @@ describe("COMMANDS.rp / stop / resume / info", () => {
     assert.match(await COMMANDS.rp(ctx, { argText: "off" }), /сброшена/i);
     assert.equal(ctx.chatData.role, null);
   });
-  test("stop/resume переключают паузу", async () => {
+  test("stop/resume toggle the pause", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     await COMMANDS.stop(ctx, { argText: "" });
     assert.equal(ctx.chatData.paused, true);
     await COMMANDS.resume(ctx, { argText: "" });
     assert.equal(ctx.chatData.paused, false);
   });
-  test("info → статус", async () => {
+  test("info → status", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     assert.match(await COMMANDS.info(ctx, { argText: "" }), /🎭/); // info panel role line — locale-neutral marker
   });
@@ -60,11 +60,11 @@ describe("COMMANDS.rp / stop / resume / info", () => {
 
 
 describe("COMMANDS.memory", () => {
-  test("статус по умолчанию", async () => {
+  test("default status", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     assert.match(await COMMANDS.memory(ctx, { argText: "" }), /Память чата/);
   });
-  test("forget стирает историю/кэш/роль/настроение/расход, настройки остаются", async () => {
+  test("forget wipes history/cache/role/mood/spend, settings remain", async () => {
     const cd = { ...DEFAULT_CHAT_DATA(), history: [{ content: "x" }], photoCache: { k: "d" }, role: "зек", personaState: { arousal: 4 }, spend: 1, spendCount: 5, config: { random: false } };
     const ctx = makeCtxFor(makeMsg(), makeEnv(), cd);
     await COMMANDS.memory(ctx, { argText: "forget" });
@@ -73,22 +73,22 @@ describe("COMMANDS.memory", () => {
     assert.equal(ctx.chatData.role, null);
     assert.deepEqual(ctx.chatData.personaState, getPersonaStateDefaults());
     assert.equal(ctx.chatData.spend, 0);
-    assert.deepEqual(ctx.chatData.config, { random: false }); // настройки целы
+    assert.deepEqual(ctx.chatData.config, { random: false }); // settings intact
   });
-  test("dedupe убирает подряд идущие повторы", async () => {
+  test("dedupe removes consecutive duplicates", async () => {
     const env = makeEnv();
     const cd = { ...DEFAULT_CHAT_DATA(), history: [
       { role: "user", content: "a", meta: { message_id: 1 } },
       { role: "user", content: "a", meta: { message_id: 2 } },
       { role: "user", content: "b", meta: { message_id: 3 } },
     ] };
-    await seedChat(env, 555, cd); // chatId по умолчанию из makeMsg
+    await seedChat(env, 555, cd); // default chatId from makeMsg
     const ctx = makeCtxFor(makeMsg(), env, cd);
     const out = await COMMANDS.memory(ctx, { argText: "dedupe" });
     assert.match(out, /Убрано повторов: 1/);
     assert.equal(ctx.chatData.history.length, 2);
   });
-  test("size_chars задаёт размер памяти", async () => {
+  test("size_chars sets the memory size", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     await COMMANDS.memory(ctx, { argText: "size_chars 9000" });
     assert.equal(ctx.chatData.config.history_chars, 9000);
@@ -97,17 +97,17 @@ describe("COMMANDS.memory", () => {
 
 
 describe("COMMANDS.config", () => {
-  test("без аргумента → справка", async () => {
+  test("no argument → help", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     assert.match(await COMMANDS.config(ctx, { argText: "" }), /Управление настройками/);
   });
-  test("reset сбрасывает всё", async () => {
+  test("reset clears everything", async () => {
     const cd = { ...DEFAULT_CHAT_DATA(), config: { random: false } };
     const ctx = makeCtxFor(makeMsg(), makeEnv(), cd);
     await COMMANDS.config(ctx, { argText: "reset" });
     assert.deepEqual(ctx.chatData.config, {});
   });
-  test("неизвестный ключ → ошибка", async () => {
+  test("unknown key → error", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     assert.match(await COMMANDS.config(ctx, { argText: "nope 1" }), /не найден/i);
   });
@@ -115,24 +115,24 @@ describe("COMMANDS.config", () => {
 
 
 describe("COMMANDS.model", () => {
-  test("без аргумента → показ модели, цены, баланса", async () => {
+  test("no argument → shows model, price, balance", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     const out = await COMMANDS.model(ctx, { argText: "" });
     assert.ok(out.includes("Текст"));
     assert.ok(out.includes("💳"));
   });
-  test("смена основной модели", async () => {
+  test("changing the main model", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     const out = await COMMANDS.model(ctx, { argText: "vendor/new" });
     assert.equal(ctx.chatData.config.model, "vendor/new");
     assert.ok(out.includes("vendor/new"));
   });
-  test("vision-подкоманда задаёт отдельную модель для фото", async () => {
+  test("vision subcommand sets a separate model for photos", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     await COMMANDS.model(ctx, { argText: "vision vis/model" });
     assert.equal(ctx.chatData.config.vision_model, "vis/model");
   });
-  test("summary-подкоманда задаёт отдельную модель для /summary", async () => {
+  test("summary subcommand sets a separate model for /summary", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     const out = await COMMANDS.model(ctx, { argText: "summary google/gemini-3.5-flash" });
     assert.equal(ctx.chatData.config.summary_model, "google/gemini-3.5-flash");
@@ -148,9 +148,9 @@ describe("COMMANDS.summary", () => {
     { role: "user", content: "и собак" },
   ];
 
-  // Сводка теперь читает НОВЫЕ сообщения из D1 (messagesSince по границе), а не из окна в памяти,
-  // поэтому чат сидируем в D1 (seedChat → строки messages с id 1..N).
-  test("меньше 3 сообщений (первая сводка) → отказ, без LLM", async () => {
+  // The summary now reads NEW messages from D1 (messagesSince past the boundary) rather than from the in-memory window,
+  // so we seed the chat into D1 (seedChat → messages rows with id 1..N).
+  test("fewer than 3 messages (first summary) → refusal, no LLM", async () => {
     const env = makeEnv();
     await seedChat(env, 555, { history: [{ role: "user", content: "привет" }, { role: "assistant", content: "ну" }] });
     const ctx = makeCtxFor(makeMsg({ chatId: 555, text: "/summary" }), env, { ...DEFAULT_CHAT_DATA() });
@@ -158,19 +158,19 @@ describe("COMMANDS.summary", () => {
     assert.equal(FETCH.of("/chat/completions").length, 0);
   });
 
-  test("генерация сводки → _summary записан, граница _cmdUptoId двинулась к max id", async () => {
+  test("summary generation → _summary written, _cmdUptoId boundary moved to max id", async () => {
     const env = makeEnv();
-    await seedChat(env, 555, { history: hist3() }); // строки с id 1,2,3
+    await seedChat(env, 555, { history: hist3() }); // rows with id 1,2,3
     const ctx = makeCtxFor(makeMsg({ chatId: 555, text: "/summary" }), env, { ...DEFAULT_CHAT_DATA() });
     FETCH.set("chat", () => sse(["сводка чата"]));
     assert.equal(await COMMANDS.summary(ctx, { argText: "" }), "сводка чата");
     assert.equal(ctx.chatData._summary, "сводка чата");
     assert.equal(ctx.chatData._cmdUptoId, 3);
     assert.ok(ctx.chatData._dirty);
-    assert.match(FETCH.chatBody().messages[0].content, /сводк/i); // системный промпт про сводку
+    assert.match(FETCH.chatBody().messages[0].content, /сводк/i); // system prompt about the summary
   });
 
-  test("нового с прошлой границы нет → отдаём кэш без LLM (хард-граница = ежедневная)", async () => {
+  test("nothing new since the last boundary → return cache without LLM (hard boundary = daily)", async () => {
     const env = makeEnv();
     await seedChat(env, 555, { history: hist3() }); // id 1..3
     const cd = { ...DEFAULT_CHAT_DATA(), _summary: "старая сводка", _dailyUptoId: 3 };
@@ -179,21 +179,21 @@ describe("COMMANDS.summary", () => {
     assert.equal(FETCH.of("/chat/completions").length, 0);
   });
 
-  test("новые сообщения после границы → LLM по ДЕЛЬТЕ (старое не уходит)", async () => {
+  test("new messages after the boundary → LLM over the DELTA (old stays out)", async () => {
     const env = makeEnv();
     await seedChat(env, 555, { history: [...hist3(), { role: "user", content: "НОВОЕ_СООБ" }] }); // id 1..4
-    const cd = { ...DEFAULT_CHAT_DATA(), _summary: "старая", _dailyUptoId: 3 }; // граница на id 3
+    const cd = { ...DEFAULT_CHAT_DATA(), _summary: "старая", _dailyUptoId: 3 }; // boundary at id 3
     const ctx = makeCtxFor(makeMsg({ chatId: 555, text: "/summary" }), env, cd);
     FETCH.set("chat", () => sse(["новая сводка"]));
     assert.equal(await COMMANDS.summary(ctx, { argText: "" }), "новая сводка");
     assert.equal(FETCH.of("/chat/completions").length, 1);
     assert.equal(ctx.chatData._cmdUptoId, 4);
     const joined = FETCH.chatBody().messages.map(m => JSON.stringify(m.content)).join(" ");
-    assert.ok(joined.includes("НОВОЕ_СООБ"));       // новый срез (id>3) ушёл
-    assert.ok(!joined.includes("обсуждаем котов"));  // старое (id<=3) НЕ ушло
+    assert.ok(joined.includes("НОВОЕ_СООБ"));       // the new slice (id>3) was sent
+    assert.ok(!joined.includes("обсуждаем котов"));  // the old part (id<=3) was NOT sent
   });
 
-  test("фолбэк LLM не кэшируется, граница не двигается", async () => {
+  test("LLM fallback is not cached, the boundary does not move", async () => {
     const env = makeEnv();
     await seedChat(env, 555, { history: hist3() });
     const ctx = makeCtxFor(makeMsg({ chatId: 555, text: "/summary" }), env, { ...DEFAULT_CHAT_DATA() });
@@ -203,12 +203,12 @@ describe("COMMANDS.summary", () => {
     assert.equal(ctx.chatData._cmdUptoId, 0);
   });
 
-  test("summary ∈ LLM_COMMANDS и TECH_COMMANDS", () => {
+  test("summary ∈ LLM_COMMANDS and TECH_COMMANDS", () => {
     assert.ok(LLM_COMMANDS.has("summary"));
     assert.ok(TECH_COMMANDS.has("summary"));
   });
 
-  test("/memory forget чистит сводку и ВСЕ границы", async () => {
+  test("/memory forget clears the summary and ALL boundaries", async () => {
     const cd = { ...DEFAULT_CHAT_DATA(), _summary: "s", _dailyUptoId: 10, _cmdUptoId: 8, _cmdDay: "2026-06-20" };
     const ctx = makeCtxFor(makeMsg(), makeEnv(), cd);
     await COMMANDS.memory(ctx, { argText: "forget" });
@@ -218,7 +218,7 @@ describe("COMMANDS.summary", () => {
     assert.equal(ctx.chatData._cmdDay, "");
   });
 
-  test("summary использует summary_model (modelOverride), если задана", async () => {
+  test("summary uses summary_model (modelOverride) when set", async () => {
     const env = makeEnv();
     await seedChat(env, 555, { history: hist3() });
     const cd = { ...DEFAULT_CHAT_DATA(), config: { summary_model: "google/gemini-3.5-flash" } };
@@ -228,7 +228,7 @@ describe("COMMANDS.summary", () => {
     assert.equal(FETCH.chatBody().model, "google/gemini-3.5-flash");
   });
 
-  test("/summary тоже курирует факты перед сводкой (rag вкл)", async () => {
+  test("/summary also curates facts before the summary (rag on)", async () => {
     const env = makeEnv({ ENABLE_RAG: "true" });
     await seedChat(env, 560, { history: [
       { role: "user", content: "меня зовут Лиза" },
@@ -236,7 +236,7 @@ describe("COMMANDS.summary", () => {
       { role: "user", content: "я люблю сыр" },
     ] });
     const ctx = makeCtxFor(makeMsg({ chatId: 560, text: "/summary" }), env, { ...DEFAULT_CHAT_DATA() });
-    let n = 0; // 1-й chat-вызов — извлечение фактов (перед сводкой), 2-й — сама сводка
+    let n = 0; // 1st chat call — fact extraction (before the summary), 2nd — the summary itself
     FETCH.set("chat", () => (++n === 1 ? sse(["Лиза любит сыр"]) : sse(["сводка"])));
     await COMMANDS.summary(ctx, { argText: "" });
     const rows = await dbMemories(env, 560);
@@ -244,17 +244,17 @@ describe("COMMANDS.summary", () => {
     assert.ok(rows.some(r => r.source === "auto"));
   });
 
-  test("/summary без rag НЕ курирует (один LLM-вызов — только сводка)", async () => {
+  test("/summary without rag does NOT curate (one LLM call — summary only)", async () => {
     const env = makeEnv(); // rag off
     await seedChat(env, 561, { history: hist3() });
     const ctx = makeCtxFor(makeMsg({ chatId: 561, text: "/summary" }), env, { ...DEFAULT_CHAT_DATA() });
     FETCH.set("chat", () => sse(["сводка"]));
     await COMMANDS.summary(ctx, { argText: "" });
     assert.equal((await dbMemories(env, 561)).length, 0);
-    assert.equal(FETCH.of("/chat/completions").length, 1); // только сводка, без извлечения
+    assert.equal(FETCH.of("/chat/completions").length, 1); // summary only, no extraction
   });
 
-  test("summary без summary_model → основная модель", async () => {
+  test("summary without summary_model → main model", async () => {
     const env = makeEnv();
     await seedChat(env, 555, { history: hist3() });
     const ctx = makeCtxFor(makeMsg({ chatId: 555, text: "/summary" }), env, { ...DEFAULT_CHAT_DATA() }); // OPENROUTER_MODEL=test/model
@@ -263,28 +263,28 @@ describe("COMMANDS.summary", () => {
     assert.equal(FETCH.chatBody().model, "test/model");
   });
 
-  // Суточный сброс командной границы. «Сегодня» (в TZ из cfg.timezone, по умолчанию UTC) берём из msg.date:
-  // 2026-07-15 05:00 UTC → день "2026-07-15" (тест-env без BOT_TZ → UTC).
+  // Daily reset of the command boundary. "Today" (in the TZ from cfg.timezone, default UTC) is taken from msg.date:
+  // 2026-07-15 05:00 UTC → day "2026-07-15" (test env without BOT_TZ → UTC).
   const m5 = () => [
     { role: "user", content: "m1" }, { role: "assistant", content: "m2" }, { role: "user", content: "m3" },
     { role: "assistant", content: "m4" }, { role: "user", content: "m5" },
   ]; // id 1..5
   const DAY_SEC = Math.floor(Date.UTC(2026, 6, 15, 5, 0) / 1000);
 
-  test("та же дата (TZ бота) → копим от cmd-границы, без сброса", async () => {
+  test("same date (bot TZ) → accumulate from the cmd boundary, no reset", async () => {
     const env = makeEnv();
     await seedChat(env, 555, { history: m5() });
     const cd = { ...DEFAULT_CHAT_DATA(), _summary: "было", _cmdDay: "2026-07-15", _cmdUptoId: 4, _dailyUptoId: 2 };
     const ctx = makeCtxFor(makeMsg({ chatId: 555, text: "/summary", date: DAY_SEC }), env, cd);
     FETCH.set("chat", () => sse(["свежее"]));
     await COMMANDS.summary(ctx, { argText: "" });
-    assert.equal(ctx.chatData._cmdUptoId, 5); // since=max(4,2)=4 → ушёл только id 5
+    assert.equal(ctx.chatData._cmdUptoId, 5); // since=max(4,2)=4 → only id 5 was sent
     const joined = FETCH.chatBody().messages.map(m => JSON.stringify(m.content)).join(" ");
     assert.ok(joined.includes("m5"));
-    assert.ok(!joined.includes("m3")); // без сброса к daily-границе (иначе ушли бы m3,m4)
+    assert.ok(!joined.includes("m3")); // no reset to the daily boundary (otherwise m3,m4 would be sent)
   });
 
-  test("новый день (TZ бота) → сброс cmd-границы, since падает к daily-границе (хард-флор)", async () => {
+  test("new day (bot TZ) → reset cmd boundary, since drops to the daily boundary (hard floor)", async () => {
     const env = makeEnv();
     await seedChat(env, 555, { history: m5() });
     const cd = { ...DEFAULT_CHAT_DATA(), _summary: "было", _cmdDay: "2026-07-14", _cmdUptoId: 4, _dailyUptoId: 2 };
@@ -294,15 +294,15 @@ describe("COMMANDS.summary", () => {
     assert.equal(ctx.chatData._cmdDay, "2026-07-15");
     assert.equal(ctx.chatData._cmdUptoId, 5);
     const joined = FETCH.chatBody().messages.map(m => JSON.stringify(m.content)).join(" ");
-    assert.ok(joined.includes("m3")); // since=max(0,2)=2 → ушли m3,m4,m5
+    assert.ok(joined.includes("m3")); // since=max(0,2)=2 → m3,m4,m5 were sent
     assert.ok(joined.includes("m5"));
-    assert.ok(!joined.includes("m1")); // но не глубже daily-границы (id<=2)
+    assert.ok(!joined.includes("m1")); // but no deeper than the daily boundary (id<=2)
   });
 });
 
 
-describe("аудит: memory и model ветки", () => {
-  test("memory алиасы forget (стереть/clear) и dedupe (повторы)", async () => {
+describe("audit: memory and model branches", () => {
+  test("memory aliases forget (стереть/clear) and dedupe (повторы)", async () => {
     for (const alias of ["стереть", "clear"]) {
       const cd = { ...DEFAULT_CHAT_DATA(), history: [{ content: "x" }], role: "r" };
       const ctx = makeCtxFor(makeMsg(), makeEnv(), cd);
@@ -318,18 +318,18 @@ describe("аудит: memory и model ветки", () => {
     const ctx = makeCtxFor(makeMsg(), env, cd);
     assert.match(await COMMANDS.memory(ctx, { argText: "повторы" }), /Убрано повторов/);
   });
-  test("memory dedupe без повторов → сообщение 'нет', не dirty", async () => {
+  test("memory dedupe with no duplicates → 'none' message, not dirty", async () => {
     const cd = { ...DEFAULT_CHAT_DATA(), history: [{ content: "a" }, { content: "b" }] };
     const ctx = makeCtxFor(makeMsg(), makeEnv(), cd);
     const out = await COMMANDS.memory(ctx, { argText: "dedupe" });
     assert.match(out, /повторов в истории нет/);
     assert.ok(!ctx.chatData._dirty);
   });
-  test("memory size_chars без значения → показ текущего", async () => {
+  test("memory size_chars without a value → show current", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     assert.match(await COMMANDS.memory(ctx, { argText: "size_chars" }), /8000/);
   });
-  test("model vision: показ когда не задана / задана / reset", async () => {
+  test("model vision: show when unset / set / reset", async () => {
     const ctx1 = makeCtxFor(makeMsg(), makeEnv());
     assert.match(await COMMANDS.model(ctx1, { argText: "vision" }), /не задана/);
 
@@ -341,7 +341,7 @@ describe("аудит: memory и model ветки", () => {
     await COMMANDS.model(ctx3, { argText: "vision reset" });
     assert.equal(ctx3.chatData.config.vision_model, "");
   });
-  test("model без аргумента: блок vision-модели и строка расхода", async () => {
+  test("model without an argument: vision-model block and spend line", async () => {
     const env = makeEnv({ OPENROUTER_VISION_MODEL: "v/env" });
     const cd = { ...DEFAULT_CHAT_DATA(), spend: 0.0052, spendCount: 3 };
     const ctx = makeCtxFor(makeMsg(), env, cd);

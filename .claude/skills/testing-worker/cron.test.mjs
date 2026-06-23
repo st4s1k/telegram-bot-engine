@@ -1,6 +1,6 @@
-// Ежедневная сводка по крону: DST-гейт «08:00 Кишинёв» (из двух UTC-кронов), opt-in по чату,
-// отправка-без-записи-в-историю, продвижение границы _dailyUptoId, пропуск при отсутствии нового,
-// изоляция ошибок по чату и тонкая обёртка WORKER.scheduled.
+// Daily summary on cron: DST gate "08:00 Chisinau" (from two UTC crons), per-chat opt-in,
+// send-without-writing-to-history, advancing the _dailyUptoId boundary, skipping when nothing new,
+// per-chat error isolation, and the thin WORKER.scheduled wrapper.
 import {
   test, describe, assert,
   makeEnv, makeMsg, seedChat, dbChat, dbHistory, dbMemories,
@@ -8,12 +8,12 @@ import {
   runDailySummaries, WORKER, DEFAULT_CHAT_DATA,
 } from "./harness.mjs";
 
-// Моменты времени (UTC), дающие 08:00 по Кишинёву в обе фазы DST, и контрольный «не 8».
-// Эти тесты задают BOT_TZ=Europe/Chisinau (заодно проверяют настраиваемый TZ + DST-гейт).
-const SUMMER_8 = Date.UTC(2026, 6, 15, 5, 0); // 15 июл 05:00 UTC = 08:00 EEST (UTC+3)
-const WINTER_8 = Date.UTC(2026, 0, 15, 6, 0); // 15 янв 06:00 UTC = 08:00 EET  (UTC+2)
-const SUMMER_9 = Date.UTC(2026, 6, 15, 6, 0); // 15 июл 06:00 UTC = 09:00 EEST → гейт не пускает
-const UTC_8 = Date.UTC(2026, 6, 15, 8, 0);    // 08:00 UTC — для гейта при дефолтном TZ (BOT_TZ не задан)
+// Time moments (UTC) that yield 08:00 in Chisinau in both DST phases, plus a control "not 8".
+// These tests set BOT_TZ=Europe/Chisinau (which also exercises the configurable TZ + DST gate).
+const SUMMER_8 = Date.UTC(2026, 6, 15, 5, 0); // Jul 15 05:00 UTC = 08:00 EEST (UTC+3)
+const WINTER_8 = Date.UTC(2026, 0, 15, 6, 0); // Jan 15 06:00 UTC = 08:00 EET  (UTC+2)
+const SUMMER_9 = Date.UTC(2026, 6, 15, 6, 0); // Jul 15 06:00 UTC = 09:00 EEST → gate blocks it
+const UTC_8 = Date.UTC(2026, 6, 15, 8, 0);    // 08:00 UTC — for the gate with the default TZ (BOT_TZ unset)
 
 const hist3 = () => [
   { role: "user", content: "обсудили релиз" },
@@ -21,24 +21,24 @@ const hist3 = () => [
   { role: "user", content: "и планы на завтра" },
 ];
 
-describe("CRON · ежедневная сводка", () => {
-  test("шлёт только подписавшимся; НЕ пишет в историю; двигает границу _dailyUptoId", async () => {
+describe("CRON · daily summary", () => {
+  test("sends only to subscribers; does NOT write to history; advances the _dailyUptoId boundary", async () => {
     const env = makeEnv({ BOT_TZ: "Europe/Chisinau" });
-    await seedChat(env, 100, { config: { daily_summary: true }, history: hist3() }); // подписан
-    await seedChat(env, 200, { history: hist3() });                                  // НЕ подписан
+    await seedChat(env, 100, { config: { daily_summary: true }, history: hist3() }); // subscribed
+    await seedChat(env, 200, { history: hist3() });                                  // NOT subscribed
     FETCH.set("chat", () => sse(["дайджест за сутки"]));
 
     await runDailySummaries(env, SUMMER_8);
 
     const sends = FETCH.sends();
     assert.equal(sends.length, 1);
-    assert.equal(sends[0].body.chat_id, 100);          // только подписанный чат
-    assert.equal((await dbChat(env, 100)).daily_upto_id, 3); // граница продвинулась к max id
-    assert.equal((await dbHistory(env, 100)).length, 3);     // сводка НЕ дописана в историю
-    assert.equal((await dbChat(env, 200)).daily_upto_id, 0); // неподписанный не тронут
+    assert.equal(sends[0].body.chat_id, 100);          // only the subscribed chat
+    assert.equal((await dbChat(env, 100)).daily_upto_id, 3); // boundary advanced to max id
+    assert.equal((await dbHistory(env, 100)).length, 3);     // summary NOT appended to history
+    assert.equal((await dbChat(env, 200)).daily_upto_id, 0); // non-subscriber untouched
   });
 
-  test("DST: зимний крон (06:00 UTC) тоже даёт 08:00 Кишинёв → шлёт", async () => {
+  test("DST: the winter cron (06:00 UTC) also gives 08:00 Chisinau → sends", async () => {
     const env = makeEnv({ BOT_TZ: "Europe/Chisinau" });
     await seedChat(env, 100, { config: { daily_summary: true }, history: hist3() });
     FETCH.set("chat", () => sse(["зимний дайджест"]));
@@ -46,7 +46,7 @@ describe("CRON · ежедневная сводка", () => {
     assert.equal(FETCH.sends().length, 1);
   });
 
-  test("DST-гейт: не 08:00 по Кишинёву (09:00) → ничего не делаем", async () => {
+  test("DST gate: not 08:00 in Chisinau (09:00) → do nothing", async () => {
     const env = makeEnv({ BOT_TZ: "Europe/Chisinau" });
     await seedChat(env, 100, { config: { daily_summary: true }, history: hist3() });
     FETCH.set("chat", () => sse(["не должно уйти"]));
@@ -55,9 +55,9 @@ describe("CRON · ежедневная сводка", () => {
     assert.equal(FETCH.of("/chat/completions").length, 0);
   });
 
-  test("нет новых сообщений с прошлой ежедневной → не шлём, граница не меняется", async () => {
+  test("no new messages since the last daily → don't send, boundary unchanged", async () => {
     const env = makeEnv({ BOT_TZ: "Europe/Chisinau" });
-    // граница уже на последнем сообщении (id 3) → дельта пуста
+    // boundary already at the last message (id 3) → delta is empty
     await seedChat(env, 100, { config: { daily_summary: true }, history: hist3(), _summary: "вчерашнее", _dailyUptoId: 3 });
     await runDailySummaries(env, SUMMER_8);
     assert.equal(FETCH.sends().length, 0);
@@ -65,24 +65,24 @@ describe("CRON · ежедневная сводка", () => {
     assert.equal((await dbChat(env, 100)).daily_upto_id, 3);
   });
 
-  test("сбой генерации в одном чате не мешает следующему", async () => {
+  test("a generation failure in one chat doesn't disrupt the next", async () => {
     const env = makeEnv({ BOT_TZ: "Europe/Chisinau" });
     await seedChat(env, 100, { config: { daily_summary: true }, history: hist3() });
     await seedChat(env, 200, { config: { daily_summary: true }, history: hist3() });
-    let n = 0; // первый по очереди чат падает (500), второй отвечает — порядок не фиксируем
+    let n = 0; // the first chat in line fails (500), the second responds — order is not pinned
     FETCH.set("chat", () => (++n === 1 ? sse([], { ok: false, status: 500 }) : sse(["дайджест"])));
 
     await runDailySummaries(env, SUMMER_8);
 
     const sends = FETCH.sends();
-    assert.equal(sends.length, 1); // ровно один чат получил сводку, второй сбой не помешал
+    assert.equal(sends.length, 1); // exactly one chat got the summary, the other's failure didn't interfere
     const okChat = sends[0].body.chat_id;
     const failChat = okChat === 100 ? 200 : 100;
-    assert.ok((await dbChat(env, okChat)).daily_upto_id > 0);    // у успешного граница двинулась
-    assert.equal((await dbChat(env, failChat)).daily_upto_id, 0); // у сбойного — нет
+    assert.ok((await dbChat(env, okChat)).daily_upto_id > 0);    // the successful one's boundary advanced
+    assert.equal((await dbChat(env, failChat)).daily_upto_id, 0); // the failed one's did not
   });
 
-  test("WORKER.scheduled делегирует в runDailySummaries", async () => {
+  test("WORKER.scheduled delegates to runDailySummaries", async () => {
     const env = makeEnv({ BOT_TZ: "Europe/Chisinau" });
     await seedChat(env, 100, { config: { daily_summary: true }, history: hist3() });
     FETCH.set("chat", () => sse(["через scheduled"]));
@@ -90,58 +90,58 @@ describe("CRON · ежедневная сводка", () => {
     assert.equal(FETCH.sends().length, 1);
   });
 
-  test("WORKER.scheduled глушит ошибку (крон не падает)", async () => {
-    // env без DB → runDailySummaries бросит на SELECT, scheduled должен поглотить.
-    // Дефолтный TZ (UTC, BOT_TZ не задан) → берём 08:00 UTC, чтобы гейт пропустил до SELECT.
+  test("WORKER.scheduled swallows the error (the cron doesn't crash)", async () => {
+    // env without DB → runDailySummaries throws on SELECT, scheduled should absorb it.
+    // Default TZ (UTC, BOT_TZ unset) → use 08:00 UTC so the gate lets it through to the SELECT.
     await WORKER.scheduled({ scheduledTime: UTC_8, cron: "0 8 * * *" }, {}, { waitUntil() {} });
     assert.ok(CONSOLE.error.some(s => s.includes("runDailySummaries failed")));
   });
 });
 
-describe("CRON · курация фактов раз в сутки", () => {
-  test("курирует чат с rag (даже без daily_summary), факты auto", async () => {
+describe("CRON · once-a-day fact curation", () => {
+  test("curates a chat with rag (even without daily_summary), facts are auto", async () => {
     const env = makeEnv({ BOT_TZ: "Europe/Chisinau" });
     await seedChat(env, 300, { config: { rag: true }, history: [
       { role: "user", content: "меня зовут Иван" },
       { role: "assistant", content: "ок" },
       { role: "user", content: "я работаю инженером" },
-    ] }); // rag вкл, daily_summary НЕТ
-    FETCH.set("chat", () => sse(["Иван работает инженером"])); // извлечение фактов
+    ] }); // rag on, daily_summary OFF
+    FETCH.set("chat", () => sse(["Иван работает инженером"])); // fact extraction
     await runDailySummaries(env, SUMMER_8);
     const rows = await dbMemories(env, 300);
     assert.ok(rows.length >= 1);
     assert.ok(rows.every(r => r.source === "auto"));
-    assert.equal(FETCH.sends().length, 0); // сводку не шлём — daily_summary выключен
+    assert.equal(FETCH.sends().length, 0); // no summary sent — daily_summary is off
   });
 
-  test("DST-гейт распространяется и на курацию (не 08:00 → ничего)", async () => {
+  test("the DST gate applies to curation too (not 08:00 → nothing)", async () => {
     const env = makeEnv({ BOT_TZ: "Europe/Chisinau" });
     await seedChat(env, 301, { config: { rag: true }, history: hist3() });
     FETCH.set("chat", () => sse(["факт"]));
-    await runDailySummaries(env, SUMMER_9); // 09:00 по Кишинёву — не наш фаер
+    await runDailySummaries(env, SUMMER_9); // 09:00 in Chisinau — not our firing window
     assert.equal((await dbMemories(env, 301)).length, 0);
     assert.equal(FETCH.of("/chat/completions").length, 0);
   });
 
-  test("чат с daily_summary, но rag выкл → сводка есть, курации нет", async () => {
+  test("chat with daily_summary but rag off → summary present, no curation", async () => {
     const env = makeEnv({ BOT_TZ: "Europe/Chisinau" });
-    await seedChat(env, 302, { config: { daily_summary: true }, history: hist3() }); // rag выкл
+    await seedChat(env, 302, { config: { daily_summary: true }, history: hist3() }); // rag off
     FETCH.set("chat", () => sse(["дайджест"]));
     await runDailySummaries(env, SUMMER_8);
-    assert.equal((await dbMemories(env, 302)).length, 0); // курации нет (rag off)
-    assert.equal(FETCH.sends().length, 1);                // сводка ушла
+    assert.equal((await dbMemories(env, 302)).length, 0); // no curation (rag off)
+    assert.equal(FETCH.sends().length, 1);                // summary went out
   });
 
-  test("граница курации сохраняется, даже если шаг сводки падает", async () => {
+  test("the curation boundary persists even if the summary step fails", async () => {
     const env = makeEnv({ BOT_TZ: "Europe/Chisinau" });
     await seedChat(env, 303, { config: { rag: true, daily_summary: true }, history: [
       { role: "user", content: "меня зовут Иван" },
       { role: "assistant", content: "ок" },
       { role: "user", content: "я работаю инженером" },
     ] });
-    FETCH.set("chat", () => sse(["Иван работает инженером"])); // извлечение фактов в курации
+    FETCH.set("chat", () => sse(["Иван работает инженером"])); // fact extraction during curation
     const realDB = env.DB;
-    let sinceCalls = 0; // 1-й messagesSince — курация (успех), 2-й — сводка (роняем)
+    let sinceCalls = 0; // 1st messagesSince — curation (success), 2nd — summary (we make it fail)
     env.DB = {
       prepare(sql) {
         if (sql.includes("id>? ORDER BY id ASC") && ++sinceCalls >= 2) {
@@ -154,7 +154,7 @@ describe("CRON · курация фактов раз в сутки", () => {
     await runDailySummaries(env, SUMMER_8);
     env.DB = realDB;
     const row = await dbChat(env, 303);
-    assert.ok(Number(row.mem_upto_id) > 0); // курация уже сохранена ДО падения сводки
+    assert.ok(Number(row.mem_upto_id) > 0); // curation was already saved BEFORE the summary failed
     assert.ok(CONSOLE.error.some(s => s.includes("runDailySummaries[chat]")));
   });
 });

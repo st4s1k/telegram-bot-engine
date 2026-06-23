@@ -1,16 +1,16 @@
 /**
- * Общий харнесс для тест-файлов `*.test.mjs` в этой папке.
+ * Shared harness for the `*.test.mjs` test files in this folder.
  *
- * Реэкспортит src/index.ts (баррель, через `export *`) + Vitest (test/describe/beforeEach) и
- * assert-shim поверх `expect`, плюс моки (in-memory KV, подменённый globalThis.fetch,
- * SSE-строитель) и фабрики (makeEnv/makeMsg/makeCtxFor/...). Каждый `*.test.mjs` импортит
- * всё отсюда одной строкой; тела тестов используют привычный `assert.*` без изменений.
+ * Re-exports src/index.ts (the barrel, via `export *`) + Vitest (test/describe/beforeEach) and
+ * an assert-shim over `expect`, plus mocks (in-memory KV, a stubbed globalThis.fetch,
+ * an SSE builder) and factories (makeEnv/makeMsg/makeCtxFor/...). Each `*.test.mjs` imports
+ * everything from here in one line; test bodies use the familiar `assert.*` unchanged.
  *
- * Тесты — обычный Vitest (node-окружение), оффлайн на моках. assert-shim позволяет не
- * переписывать ~530 ассертов: `assert.equal/ok/deepEqual/match/notEqual/throws` → `expect`.
+ * Tests are plain Vitest (node environment), offline on mocks. The assert-shim avoids
+ * rewriting ~530 assertions: `assert.equal/ok/deepEqual/match/notEqual/throws` → `expect`.
  *
- * FETCH — стабильный синглтон: его состояние (_calls/_responders) сбрасывается в beforeEach,
- * а сам объект не пересоздаётся, поэтому `const { FETCH } = ...` в тест-файлах безопасен.
+ * FETCH is a stable singleton: its state (_calls/_responders) is reset in beforeEach,
+ * but the object itself is not recreated, so `const { FETCH } = ...` in test files is safe.
  */
 
 import { beforeEach, expect } from "vitest";
@@ -18,9 +18,9 @@ import { DatabaseSync } from "node:sqlite";
 import { readFileSync, readdirSync } from "node:fs";
 import * as W from "../../../src/index.ts";
 
-// --- реэкспорт для тест-файлов ---
+// --- re-export for test files ---
 export { test, describe, beforeEach } from "vitest";
-// assert-shim: маппинг node:assert/strict → vitest expect (только методы, что реально нужны).
+// assert-shim: maps node:assert/strict → vitest expect (only the methods actually needed).
 export const assert = {
   equal: (a, b, msg) => expect(a, msg).toBe(b),
   strictEqual: (a, b, msg) => expect(a, msg).toBe(b),
@@ -32,23 +32,23 @@ export const assert = {
 };
 export * from "../../../src/index.ts";
 export { default as WORKER } from "../../../src/index.ts";
-// Движок (src/index.ts) persona-free — харнесс не реэкспортит контент пака. Persona-специфичные
-// тесты (живут в репо пака, стейджятся рядом) импортят символы пака напрямую из src/persona/_pack/.
-// Фолбэк-строки движок больше не экспортит как константы — они в АКТИВНОЙ персоне. Берём их из
-// реестра, РАЗРЕШЁННЫЕ для языка по умолчанию (getPersonaTexts(DEFAULT_LANG)) — ровно то, что вернёт
-// callOpenRouter при cfg.lang по умолчанию. Без localeTexts (нейтраль/fasol) это совпадает с базовыми
-// текстами; с мультиязычным паком (как демо) — берётся локаль по умолчанию, и тесты не падают.
+// The engine (src/index.ts) is persona-free — the harness does not re-export pack content. Persona-specific
+// tests (which live in the pack repo and are staged alongside) import pack symbols directly from src/persona/_pack/.
+// The engine no longer exports fallback strings as constants — they live in the ACTIVE persona. We take them from
+// the registry, RESOLVED for the default language (getPersonaTexts(DEFAULT_LANG)) — exactly what
+// callOpenRouter returns at the default cfg.lang. Without localeTexts (neutral/fasol) this matches the base
+// texts; with a multilingual pack (like the demo) the default locale is taken, and the tests do not fail.
 export const FALLBACK_LLM_ERROR = W.getPersonaTexts(W.DEFAULT_LANG).fallbackError;
 export const FALLBACK_NO_CREDITS = W.getPersonaTexts(W.DEFAULT_LANG).fallbackNoCredits;
 
-// --- console: глушим ожидаемый шум воркера, складываем в буфер для проверок ---
+// --- console: silence the worker's expected noise, collect it into a buffer for checks ---
 export const CONSOLE = { log: [], warn: [], error: [] };
 console.log = (...a) => CONSOLE.log.push(a.map(String).join(" "));
 console.warn = (...a) => CONSOLE.warn.push(a.map(String).join(" "));
 console.error = (...a) => CONSOLE.error.push(a.map(String).join(" "));
 export function clearConsole() { CONSOLE.log = []; CONSOLE.warn = []; CONSOLE.error = []; }
 
-// --- Math.random stub: очередь значений, затем последнее повторяется ---
+// --- Math.random stub: a queue of values, then the last one repeats ---
 const _randOrig = Math.random;
 export function stubRandom(...values) {
   let i = 0;
@@ -56,7 +56,7 @@ export function stubRandom(...values) {
 }
 export function restoreRandom() { Math.random = _randOrig; }
 
-// --- ответы fetch-мока ---
+// --- fetch-mock responses ---
 export function jsonResp(obj, { ok = true, status = 200 } = {}) {
   return { ok, status, async json() { return obj; }, async text() { return JSON.stringify(obj); } };
 }
@@ -66,7 +66,7 @@ function concatBytes(chunks) {
   for (const c of chunks) { out.set(c, off); off += c.length; }
   return out;
 }
-// Поток из заранее заданных Uint8Array-чанков (для проверки буферизации неполных строк SSE).
+// A stream of predefined Uint8Array chunks (to test buffering of incomplete SSE lines).
 export function streamResp(chunks, { ok = true, status = 200 } = {}) {
   let i = 0;
   return {
@@ -75,7 +75,7 @@ export function streamResp(chunks, { ok = true, status = 200 } = {}) {
     async text() { return new TextDecoder().decode(concatBytes(chunks)); },
   };
 }
-// SSE-ответ chat/completions из дельт + опц. usage.cost. raw — подменить тело целиком.
+// An SSE chat/completions response built from deltas + optional usage.cost. raw — replace the whole body.
 export function sse(deltas, { cost, ok = true, status = 200, raw, splitAcrossChunks = false } = {}) {
   const lines = [];
   for (const d of deltas) {
@@ -87,13 +87,13 @@ export function sse(deltas, { cost, ok = true, status = 200, raw, splitAcrossChu
   const text = (raw !== undefined ? raw : lines.join("\n")) + "\n";
   const bytes = new TextEncoder().encode(text);
   if (splitAcrossChunks) {
-    const mid = Math.floor(bytes.length / 2); // рвём ровно посередине: строка SSE между двумя read()
+    const mid = Math.floor(bytes.length / 2); // split exactly in the middle: an SSE line spans two read() calls
     return streamResp([bytes.slice(0, mid), bytes.slice(mid)], { ok, status });
   }
   return streamResp([bytes], { ok, status });
 }
 
-// --- fetch-маршрутизатор: стабильный синглтон FETCH, состояние сбрасывается в beforeEach ---
+// --- fetch router: a stable FETCH singleton, state reset in beforeEach ---
 let _msgIdSeq = 5000;
 let _calls = [];
 let _responders = defaultResponders();
@@ -117,7 +117,7 @@ export const FETCH = {
   sends() { return _calls.filter(c => c.url.includes("/sendMessage")); },
   chatBody() { return _calls.find(c => c.url.includes("/chat/completions"))?.body; },
 };
-// newFetch() сбрасывает состояние и возвращает тот же стабильный FETCH (для ресета внутри теста).
+// newFetch() resets state and returns the same stable FETCH (for resetting inside a test).
 export function newFetch() { resetFetch(); return FETCH; }
 globalThis.fetch = async (url, opts = {}) => {
   const u = String(typeof url === "string" ? url : url?.url ?? url);
@@ -137,8 +137,8 @@ globalThis.fetch = async (url, opts = {}) => {
     if (u.includes("/getChat")) return _responders.getChat(call);
     throw new Error("unexpected fetch: " + method + " " + u);
   };
-  // Как настоящий fetch: ac.abort(reason) → промис реджектится этим reason. Гонка ответа
-  // с прерыванием делает idle/hard-таймаут тестируемым (см. llm.test «idle-таймаут»).
+  // Like real fetch: ac.abort(reason) → the promise rejects with that reason. Racing the response
+  // against the abort makes the idle/hard timeout testable (see llm.test "idle timeout").
   const sig = opts.signal;
   if (!sig) return respond();
   if (sig.aborted) throw sig.reason;
@@ -171,9 +171,9 @@ export function makeKV(initial = {}, { pageSize = Infinity } = {}) {
   };
 }
 
-// --- D1 (DB) поверх node:sqlite: реальный SQLite-движок (тот же, что в проде D1), шим API D1Database. ---
-// Применяем ВСЕ миграции по порядку имён (0001, 0002, …) — как `wrangler d1 migrations apply`,
-// чтобы тесты видели ту же схему, что прод (новые колонки из 0002+ и т.д.).
+// --- D1 (DB) over node:sqlite: a real SQLite engine (the same one D1 uses in prod), shimming the D1Database API. ---
+// Apply ALL migrations in name order (0001, 0002, …) — like `wrangler d1 migrations apply`,
+// so the tests see the same schema as prod (new columns from 0002+, etc.).
 const MIG_DIR = new URL("../../../migrations/", import.meta.url);
 const D1_MIGRATIONS = readdirSync(MIG_DIR)
   .filter(f => f.endsWith(".sql"))
@@ -200,10 +200,10 @@ export function makeD1() {
   };
 }
 
-// --- Workers AI (env.AI): детерминированный эмбеддинг для тестов ---
-// Вектор = гистограмма кодов символов по `dim` корзинам, L2-нормированная: похожие тексты →
-// близкие векторы (косинус), чего достаточно для проверки порядка top-K. dim=8 не зависит от
-// прод-размерности (1024) — в тестах важен только относительный порядок, не семантика.
+// --- Workers AI (env.AI): a deterministic embedding for tests ---
+// The vector = a histogram of character codes across `dim` buckets, L2-normalized: similar texts →
+// close vectors (cosine), which is enough to check top-K ordering. dim=8 is independent of
+// the prod dimension (1024) — in tests only the relative ordering matters, not the semantics.
 export function makeAI({ dim = 8 } = {}) {
   const embed = (text) => {
     const v = new Array(dim).fill(0);
@@ -218,8 +218,8 @@ export function makeAI({ dim = 8 } = {}) {
     async run(model, inputs) {
       calls.push({ model, inputs });
       const text = inputs?.text;
-      // Прод-контракт bge-m3: поле `text` обязательно. Регресс на иной ключ ({prompt:...})
-      // должен падать в тестах, а не возвращать мусорный эмбеддинг пустой строки.
+      // bge-m3 prod contract: the `text` field is required. A regression to a different key ({prompt:...})
+      // should fail in tests, not return a garbage embedding of an empty string.
       if (text === undefined || text === null) throw new Error("makeAI: missing inputs.text");
       const arr = Array.isArray(text) ? text : [text];
       return { shape: [arr.length, dim], data: arr.map(embed) };
@@ -227,10 +227,10 @@ export function makeAI({ dim = 8 } = {}) {
   };
 }
 
-// --- Vectorize (env.VECTORIZE): in-memory индекс с косинусным поиском ---
-// Достоверно повторяет семантику прода: namespace-фильтр ДО метаданных, top-K по косинусу,
-// metadata отдаётся только при returnMetadata ('all'/'indexed'/true), values — при returnValues
-// (забытый флаг всплывёт падением теста). insert кидает на дубль id, upsert перезаписывает.
+// --- Vectorize (env.VECTORIZE): an in-memory index with cosine search ---
+// Faithfully reproduces prod semantics: namespace filter BEFORE metadata, top-K by cosine,
+// metadata returned only when returnMetadata ('all'/'indexed'/true), values — when returnValues
+// (a forgotten flag surfaces as a failing test). insert throws on a duplicate id, upsert overwrites.
 export function makeVectorize(seed = []) {
   const store = new Map(); // id → { id, values, metadata, namespace }
   for (const v of seed) store.set(v.id, v);
@@ -276,8 +276,8 @@ export function makeVectorize(seed = []) {
   };
 }
 
-// Засеять курированные ФАКТЫ чата (параллель addMemory) — для тестов recall долгой памяти.
-// items: [{ mem_id, text, source? }]. id вектора и namespace — по правилам прода (mem:/m<id>:).
+// Seed curated chat FACTS (parallel to addMemory) — for long-term-memory recall tests.
+// items: [{ mem_id, text, source? }]. The vector id and namespace follow the prod rules (mem:/m<id>:).
 export function seedMemories(env, id, items = []) {
   for (const it of items) {
     const vid = W.memVectorId(id, it.mem_id);
@@ -290,13 +290,13 @@ export function seedMemories(env, id, items = []) {
   }
 }
 
-// Прочитать факты чата из D1 (для ассертов).
+// Read chat facts from D1 (for assertions).
 export async function dbMemories(env, id) {
   const r = await env.DB.prepare("SELECT id, text, source FROM memories WHERE chat_id=? ORDER BY id").bind(String(id)).all();
   return (r.results || []).map(x => ({ id: Number(x.id), text: x.text, source: x.source }));
 }
 
-// Засеять чат в D1 (состояние + строки истории) — замена прежнего kvInit для storage-тестов.
+// Seed a chat into D1 (state + history rows) — a replacement for the old kvInit for storage tests.
 export async function seedChat(env, id, cd = {}) {
   await W.flushChatData(id, env, { ...W.DEFAULT_CHAT_DATA(), ...cd });
   const hist = cd.history || [];
@@ -308,7 +308,7 @@ export async function seedChat(env, id, cd = {}) {
   }
 }
 
-// Прочитать историю/состояние чата из D1 (для ассертов).
+// Read chat history/state from D1 (for assertions).
 export async function dbHistory(env, id) {
   const r = await env.DB.prepare("SELECT role, content, meta FROM messages WHERE chat_id=? ORDER BY id").bind(String(id)).all();
   return (r.results || []).map(x => ({ role: x.role, content: x.content, ...(x.meta ? { meta: JSON.parse(x.meta) } : {}) }));
@@ -317,7 +317,7 @@ export async function dbChat(env, id) {
   return env.DB.prepare("SELECT * FROM chats WHERE chat_id=?").bind(String(id)).first();
 }
 
-// --- фабрики ---
+// --- factories ---
 export function makeEnv(over = {}, kvInit = {}, kvOpts = {}) {
   const kv = makeKV(kvInit, kvOpts);
   const env = {
@@ -330,12 +330,12 @@ export function makeEnv(over = {}, kvInit = {}, kvOpts = {}) {
     OPENROUTER_MODEL: "test/model",
     BOT_USERNAME: "testbot",
     BOT_NAME: "Bot",
-    ADMIN_USERNAMES: "admin", // движок не хардкодит дефолт-админа; задаём дженерик в тест-env
+    ADMIN_USERNAMES: "admin", // the engine doesn't hardcode a default admin; we set a generic one in the test env
     ...over,
   };
   env._kv = kv;
   env._db = env.DB;
-  env._ai = env.AI;   // указывает на актуальный AI (в т.ч. переопределённый через over)
+  env._ai = env.AI;   // points to the current AI (including one overridden via over)
   env._vec = env.VECTORIZE;
   return env;
 }
@@ -379,5 +379,5 @@ export function photoSizes(uidBig = "big", { sameUid = false } = {}) {
   ];
 }
 
-// Общий setup перед каждым тестом: свежий fetch-мок, чистая консоль, дефолтный Math.random.
+// Shared setup before each test: a fresh fetch-mock, a clean console, the default Math.random.
 beforeEach(() => { resetFetch(); clearConsole(); restoreRandom(); });

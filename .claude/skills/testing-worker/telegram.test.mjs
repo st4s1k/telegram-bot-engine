@@ -1,7 +1,7 @@
 import * as H from "./harness.mjs";
 const {
   test, describe, assert, WORKER,
-  // worker.js — функции и константы
+  // worker.js — functions and constants
   toMarkdownV2, sendTelegramMessage, sendAndStore, isFallbackMessage, reportError,
   dedupeHistory, collapseConsecutiveDuplicates, trimHistoryByChars, historyChars,
   appendHistory, updateHistoryMessage,
@@ -24,7 +24,7 @@ const {
   handleTelegramMessage, COMMANDS, LLM_COMMANDS, TECH_COMMANDS,
   RANDOM_HANDLERS,
   TELEGRAM_MSG_LIMIT, HISTORY_HARD_CAP_ITEMS, FALLBACK_LLM_ERROR, FALLBACK_NO_CREDITS,
-  // харнесс
+  // harness
   makeEnv, makeMsg, makeKV, makeCtxFor, photoSizes, sse, jsonResp, streamResp,
   stubRandom, restoreRandom, CONSOLE, clearConsole, FETCH, newFetch,
 } = H;
@@ -35,7 +35,7 @@ const {
 /* ====================================================================== */
 
 describe("sendTelegramMessage", () => {
-  test("нормализация ** → * и ## → жирный; успешная отправка MarkdownV2", async () => {
+  test("normalizes ** → * and ## → bold; successful MarkdownV2 send", async () => {
     const data = await sendTelegramMessage("123:T", 1, "**жир** и\n## Заголовок", 50);
     assert.ok(data?.ok);
     const body = FETCH.sends()[0].body;
@@ -44,13 +44,13 @@ describe("sendTelegramMessage", () => {
     assert.ok(body.text.includes("*жир*"));
   });
 
-  test("пустой текст после нормализации → null, без запроса", async () => {
+  test("empty text after normalization → null, no request", async () => {
     const data = await sendTelegramMessage("123:T", 1, "   ", undefined);
     assert.equal(data, null);
     assert.equal(FETCH.sends().length, 0);
   });
 
-  test("ошибка MarkdownV2 → фолбэк на plain без parse_mode", async () => {
+  test("MarkdownV2 error → fallback to plain without parse_mode", async () => {
     let n = 0;
     FETCH.set("send", () => (++n === 1)
       ? jsonResp({ ok: false, description: "can't parse entities" })
@@ -65,7 +65,7 @@ describe("sendTelegramMessage", () => {
 
 
 describe("sendAndStore", () => {
-  test("чистит [from:...], схлопывает переносы, сохраняет ответ ассистента", async () => {
+  test("strips [from:...], collapses newlines, stores the assistant reply", async () => {
     const ctx = makeCtxFor(makeMsg({ message_id: 200 }), makeEnv());
     await sendAndStore(ctx, "[from:Bot] привет\n\n\n\nкак дела");
     const sent = FETCH.sends()[0].body.text;
@@ -76,12 +76,12 @@ describe("sendAndStore", () => {
     assert.ok(!/\n{3,}/.test(last.content));
   });
 
-  test("пустой после чистки → null", async () => {
+  test("empty after stripping → null", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     assert.equal(await sendAndStore(ctx, "[from:X] "), null);
   });
 
-  test("длинный текст бьётся на части ≤ лимита; reply_to только у первой", async () => {
+  test("long text is split into chunks ≤ the limit; reply_to only on the first", async () => {
     const ctx = makeCtxFor(makeMsg({ message_id: 300 }), makeEnv());
     await sendAndStore(ctx, "a".repeat(TELEGRAM_MSG_LIMIT + 500));
     const sends = FETCH.sends();
@@ -90,23 +90,23 @@ describe("sendAndStore", () => {
     assert.equal(sends[1].body.reply_to_message_id, undefined);
   });
 
-  test("разбиение не рвёт суррогатную пару (эмодзи на границе → нет U+FFFD)", async () => {
+  test("splitting does not break a surrogate pair (emoji on the boundary → no U+FFFD)", async () => {
     const ctx = makeCtxFor(makeMsg({ message_id: 301 }), makeEnv());
-    const text = "a".repeat(TELEGRAM_MSG_LIMIT - 1) + "😀"; // эмодзи (2 код-юнита) ровно на стыке
+    const text = "a".repeat(TELEGRAM_MSG_LIMIT - 1) + "😀"; // emoji (2 code units) right on the seam
     await sendAndStore(ctx, text);
     const sends = FETCH.sends();
     assert.equal(sends.length, 2);
-    assert.ok(!sends.some(s => s.body.text.includes("�"))); // ни одной «битой» половинки суррогата
-    assert.equal(sends.map(s => s.body.text).join(""), text);    // склейка частей = исходный текст
+    assert.ok(!sends.some(s => s.body.text.includes("�"))); // not a single "broken" surrogate half
+    assert.equal(sends.map(s => s.body.text).join(""), text);    // joined chunks = original text
   });
 
-  test("skipHistory не пишет в историю", async () => {
+  test("skipHistory does not write to history", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     await sendAndStore(ctx, "технический ответ", { skipHistory: true });
     assert.equal(ctx.chatData.history.length, 0);
   });
 
-  test("фолбэк-сообщения не сохраняются в историю", async () => {
+  test("fallback messages are not stored in history", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     await sendAndStore(ctx, FALLBACK_LLM_ERROR);
     assert.equal(ctx.chatData.history.length, 0);
@@ -114,38 +114,38 @@ describe("sendAndStore", () => {
 });
 
 describe("reportError", () => {
-  test("critical + ADMIN_CHAT_IDS → алерт в Telegram + троттл в KV", async () => {
+  test("critical + ADMIN_CHAT_IDS → alert to Telegram + throttle in KV", async () => {
     const env = makeEnv({ ADMIN_CHAT_IDS: "999" });
     await reportError(env, "flushChatData", new Error("d1 down"), { critical: true });
     const sends = FETCH.sends();
     assert.equal(sends.length, 1);
     assert.equal(sends[0].body.chat_id, 999);
     assert.ok(sends[0].body.text.includes("flushChatData"));
-    assert.ok(await env._kv.get("errnotify:flushChatData")); // троттл выставлен
+    assert.ok(await env._kv.get("errnotify:flushChatData")); // throttle is set
   });
 
-  test("CSV-список: алерт всем chat_id (вкл. группу с отрицательным id)", async () => {
+  test("CSV list: alert to every chat_id (incl. a group with a negative id)", async () => {
     const env = makeEnv({ ADMIN_CHAT_IDS: "111, -100222" });
     await reportError(env, "scheduled", new Error("boom"), { critical: true });
     const ids = FETCH.sends().map(s => s.body.chat_id).sort((a, b) => a - b);
     assert.deepEqual(ids, [-100222, 111]);
   });
 
-  test("повторный critical в окне троттла → без второго алерта", async () => {
+  test("repeated critical within the throttle window → no second alert", async () => {
     const env = makeEnv({ ADMIN_CHAT_IDS: "999" });
     await reportError(env, "flushChatData", new Error("x"), { critical: true });
     await reportError(env, "flushChatData", new Error("y"), { critical: true });
     assert.equal(FETCH.sends().length, 1);
   });
 
-  test("critical без ADMIN_CHAT_IDS → только лог, без алерта", async () => {
+  test("critical without ADMIN_CHAT_IDS → log only, no alert", async () => {
     const env = makeEnv();
     await reportError(env, "scheduled", new Error("boom"), { critical: true });
     assert.equal(FETCH.sends().length, 0);
     assert.ok(CONSOLE.error.some(s => s.includes("scheduled")));
   });
 
-  test("не-critical → только лог, без алерта даже с ADMIN_CHAT_IDS", async () => {
+  test("non-critical → log only, no alert even with ADMIN_CHAT_IDS", async () => {
     const env = makeEnv({ ADMIN_CHAT_IDS: "999" });
     await reportError(env, "runDailySummaries[chat]", new Error("nope"));
     assert.equal(FETCH.sends().length, 0);

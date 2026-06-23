@@ -1,7 +1,7 @@
 import * as H from "./harness.mjs";
 const {
   test, describe, assert, WORKER,
-  // worker.js — функции и константы
+  // worker.js — functions and constants
   toMarkdownV2, sendTelegramMessage, sendAndStore, isFallbackMessage,
   dedupeHistory, collapseConsecutiveDuplicates, trimHistoryByChars, historyChars,
   appendHistory, updateHistoryMessage,
@@ -25,18 +25,18 @@ const {
   handleTelegramMessage, COMMANDS, LLM_COMMANDS, TECH_COMMANDS,
   RANDOM_HANDLERS,
   TELEGRAM_MSG_LIMIT, HISTORY_HARD_CAP_ITEMS, FALLBACK_LLM_ERROR, FALLBACK_NO_CREDITS,
-  // харнесс
+  // harness
   makeEnv, makeMsg, makeKV, makeCtxFor, photoSizes, sse, jsonResp, streamResp,
   stubRandom, restoreRandom, CONSOLE, clearConsole, FETCH, newFetch,
 } = H;
 
-describe("утилиты", () => {
-  test("escapeRegExp экранирует спецсимволы regex", () => {
+describe("utilities", () => {
+  test("escapeRegExp escapes regex special characters", () => {
     assert.equal(escapeRegExp("a.b*c+?"), "a\\.b\\*c\\+\\?");
     assert.equal(escapeRegExp("[x](y)"), "\\[x\\]\\(y\\)");
   });
 
-  test("lastToken берёт последнее слово (с юникодом), игнорит хвостовую пунктуацию", () => {
+  test("lastToken takes the last word (with unicode), ignores trailing punctuation", () => {
     assert.equal(lastToken("привет да"), "да");
     assert.equal(lastToken("это 300!"), "300");
     assert.equal(lastToken("ну, пока..."), "пока");
@@ -44,33 +44,33 @@ describe("утилиты", () => {
     assert.equal(lastToken("!!!"), "");
   });
 
-  test("pickOne возвращает элемент массива (детерминированно через random)", () => {
+  test("pickOne returns an array element (deterministically via random)", () => {
     stubRandom(0);
     assert.equal(pickOne(["a", "b", "c"]), "a");
     stubRandom(0.99);
     assert.equal(pickOne(["a", "b", "c"]), "c");
-    assert.equal(pickOne("scalar"), "scalar"); // не массив — возвращает как есть
+    assert.equal(pickOne("scalar"), "scalar"); // not an array — returns as is
   });
 
-  test("newReqId длиной REQ_ID_LEN (8)", () => {
+  test("newReqId has length REQ_ID_LEN (8)", () => {
     const id = newReqId();
     assert.equal(id.length, 8);
     assert.match(id, /^[0-9a-f]{8}$/);
   });
 
-  test("asciiHeader percent-кодирует не-ASCII, ASCII оставляет", () => {
+  test("asciiHeader percent-encodes non-ASCII, leaves ASCII as is", () => {
     assert.equal(asciiHeader("Hello"), "Hello");
     assert.equal(asciiHeader("Бот"), encodeURIComponent("Бот"));
     assert.equal(asciiHeader(""), "");
   });
 
-  test("stripBotMentions убирает @bot и схлопывает пробелы", () => {
+  test("stripBotMentions removes @bot and collapses spaces", () => {
     const cfg = getGlobalConfig(makeEnv());
     assert.equal(stripBotMentions("привет   @testbot пока", cfg), "привет пока");
     assert.equal(stripBotMentions("  раз два  ", cfg), "раз два");
   });
 
-  test("parseRoots: lowercase, дедуп, разбиение по запятой/пробелу, лимит 8", () => {
+  test("parseRoots: lowercase, dedup, split by comma/space, limit 8", () => {
     const cfg = getGlobalConfig(makeEnv());
     assert.deepEqual(parseRoots("Иван, иван  Пётр", cfg), ["иван", "пётр"]);
     assert.deepEqual(parseRoots("", cfg), []);
@@ -78,14 +78,14 @@ describe("утилиты", () => {
     assert.equal(many.length, 8);
   });
 
-  test("isCommand распознаёт только существующие команды", () => {
+  test("isCommand recognizes only existing commands", () => {
     assert.equal(isCommand("help"), true);
     assert.equal(isCommand("config"), true);
     assert.equal(isCommand("llm"), false);
     assert.equal(isCommand("nope"), false);
   });
 
-  test("isFallbackMessage ловит фолбэки и игнорит обычный текст", () => {
+  test("isFallbackMessage catches fallbacks and ignores ordinary text", () => {
     assert.equal(isFallbackMessage(FALLBACK_LLM_ERROR), true);
     assert.equal(isFallbackMessage(FALLBACK_NO_CREDITS), true);
     assert.equal(isFallbackMessage("  " + FALLBACK_LLM_ERROR + "  "), true); // trim
@@ -95,30 +95,30 @@ describe("утилиты", () => {
 
 
 /* ====================================================================== */
-/* =====================  ИМЕНА / META  ================================= */
+/* =====================  NAMES / META  ================================= */
 /* ====================================================================== */
 
-describe("имена и метаданные", () => {
-  test("pickTargetName: автор реплая → автор → fallback", () => {
+describe("names and metadata", () => {
+  test("pickTargetName: reply author → author → fallback", () => {
     const m = makeMsg({ from: { first_name: "Аня" }, reply_to_message: { from: { first_name: "Боря" } } });
     assert.equal(pickTargetName(m), "Боря");
     assert.equal(pickTargetName(makeMsg({ from: { first_name: "Аня" } })), "Аня");
     assert.ok(pickTargetName(makeMsg({ from: {} }))); // no name → persona targetNameFallback (locale-dependent)
   });
 
-  test("getUserName: имя автора или 'User'", () => {
+  test("getUserName: author name or 'User'", () => {
     assert.equal(getUserName(makeMsg({ from: { first_name: "Аня" } })), "Аня");
     assert.equal(getUserName(makeMsg({ from: {} })), "User");
   });
 
-  test("chatTitleFromMsg: title группы / имя+@username лички", () => {
+  test("chatTitleFromMsg: group title / name+@username for private chat", () => {
     assert.equal(chatTitleFromMsg(makeMsg({ chatTitle: "Чат" })), "Чат");
     const m = makeMsg({ from: { first_name: "Аня", last_name: "К", username: "anya" }, chat: { id: 1, type: "private" } });
     assert.equal(chatTitleFromMsg(m), "Аня К @anya");
     assert.equal(chatTitleFromMsg({ chat: {}, from: {} }), "");
   });
 
-  test("pickRandomUserText фильтрует сообщения с @упоминанием бота", () => {
+  test("pickRandomUserText filters out messages with an @mention of the bot", () => {
     stubRandom(0);
     const hist = [
       { role: "user", content: "@testbot эй" },
@@ -129,7 +129,7 @@ describe("имена и метаданные", () => {
     assert.equal(pickRandomUserText([], "testbot"), "");
   });
 
-  test("getUserMeta собирает поля + media_group_id + photo_key", () => {
+  test("getUserMeta gathers fields + media_group_id + photo_key", () => {
     const m = makeMsg({
       from: { id: 7, first_name: "Аня", username: "anya" },
       photo: photoSizes("PK"),
@@ -142,10 +142,10 @@ describe("имена и метаданные", () => {
     assert.equal(meta.username, "anya");
     assert.equal(meta.reply_message_id, 11);
     assert.equal(meta.media_group_id, "999");
-    assert.equal(meta.photo_key, "PK"); // file_unique_id крупнейшего размера
+    assert.equal(meta.photo_key, "PK"); // file_unique_id of the largest size
   });
 
-  test("buildUserItem / buildAssistantItem формируют корректные элементы истории", () => {
+  test("buildUserItem / buildAssistantItem form correct history items", () => {
     const u = buildUserItem(makeMsg({ from: { first_name: "Аня", id: 7 } }), "привет");
     assert.equal(u.role, "user");
     assert.equal(u.content, "привет");
@@ -160,14 +160,14 @@ describe("имена и метаданные", () => {
     assert.equal(a.meta.username, "@testbot");
   });
 
-  test("formatWithMeta: [from:Имя] + метка времени (ts) в заданном TZ, без msg:N", () => {
-    // без ts — только имя (никаких внутренних id)
+  test("formatWithMeta: [from:Name] + timestamp (ts) in the given TZ, without msg:N", () => {
+    // without ts — name only (no internal ids)
     assert.equal(formatWithMeta({ role: "user", content: "текст", meta: { name: "Аня", message_id: 9 } }), "[from:Аня]\nтекст");
     assert.equal(formatWithMeta({ content: "x" }), "[from:user]\nx");
     const ts = Date.UTC(2026, 4, 31, 17, 48, 1);
-    // дефолтный TZ — UTC (2026-05-31 17:48 UTC)
+    // default TZ — UTC (2026-05-31 17:48 UTC)
     assert.equal(formatWithMeta({ role: "user", content: "т", meta: { name: "Сергей", ts } }), "[from:Сергей; 2026-05-31 17:48]\nт");
-    // явный TZ-параметр (Europe/Chisinau): 17:48 UTC = 20:48 EEST
+    // explicit TZ parameter (Europe/Chisinau): 17:48 UTC = 20:48 EEST
     assert.equal(formatWithMeta({ role: "user", content: "т", meta: { name: "Сергей", ts } }, "Europe/Chisinau"), "[from:Сергей; 2026-05-31 20:48]\nт");
   });
 });
@@ -178,40 +178,40 @@ describe("имена и метаданные", () => {
 /* ====================================================================== */
 
 describe("toMarkdownV2", () => {
-  test("экранирует спецсимволы обычного текста", () => {
+  test("escapes special characters in ordinary text", () => {
     assert.equal(toMarkdownV2("a.b!c-d"), "a\\.b\\!c\\-d");
     assert.equal(toMarkdownV2("(x) [y] {z}"), "\\(x\\) \\[y\\] \\{z\\}");
   });
 
-  test("сохраняет парную разметку *жирный* _курсив_ ~зачёркнутый~", () => {
+  test("preserves paired markup *bold* _italic_ ~strikethrough~", () => {
     assert.equal(toMarkdownV2("*bold*"), "*bold*");
     assert.equal(toMarkdownV2("_it_"), "_it_");
     assert.equal(toMarkdownV2("~s~"), "~s~");
-    // спецсимвол внутри жирного экранируется
+    // a special character inside bold is escaped
     assert.equal(toMarkdownV2("*a.b*"), "*a\\.b*");
   });
 
-  test("спойлер ||...|| и инлайн-код `...`", () => {
+  test("spoiler ||...|| and inline code `...`", () => {
     assert.equal(toMarkdownV2("||секрет!||"), "||секрет\\!||");
-    assert.equal(toMarkdownV2("`code.x`"), "`code.x`"); // внутри кода точка НЕ экранируется
-    assert.equal(toMarkdownV2("`a\\b`"), "`a\\\\b`");   // бэкслеш внутри кода удваивается
+    assert.equal(toMarkdownV2("`code.x`"), "`code.x`"); // inside code the dot is NOT escaped
+    assert.equal(toMarkdownV2("`a\\b`"), "`a\\\\b`");   // a backslash inside code is doubled
   });
 
-  test("блок кода ```...``` экранирует только ` и \\", () => {
+  test("code block ```...``` escapes only ` and \\", () => {
     assert.equal(toMarkdownV2("```a.b!```"), "```a.b!```");
   });
 
-  test("ссылка [текст](url): экранирует текст и ) в url", () => {
+  test("link [text](url): escapes the text and ) in the url", () => {
     assert.equal(toMarkdownV2("[a.b](http://x/y)"), "[a\\.b](http://x/y)");
   });
 
-  test("незакрытые маркеры трактуются как обычный текст (экранируются)", () => {
+  test("unclosed markers are treated as ordinary text (escaped)", () => {
     assert.equal(toMarkdownV2("*непарный"), "\\*непарный");
-    // перенос строки внутри инлайн-маркера → не разметка
+    // a line break inside an inline marker → not markup
     assert.equal(toMarkdownV2("*a\nb*"), "\\*a\nb\\*");
   });
 
-  test("пустой/нестроковый ввод не падает", () => {
+  test("empty/non-string input does not crash", () => {
     assert.equal(toMarkdownV2(""), "");
     assert.equal(toMarkdownV2(null), "");
     assert.equal(toMarkdownV2(undefined), "");
@@ -220,15 +220,15 @@ describe("toMarkdownV2", () => {
 
 
 /* ====================================================================== */
-/* =====================  ИСТОРИЯ  ====================================== */
+/* =====================  HISTORY  ====================================== */
 /* ====================================================================== */
 
-describe("история — обслуживание", () => {
-  test("dedupeHistory убирает дубли по role:message_id, без id оставляет все", () => {
+describe("history — maintenance", () => {
+  test("dedupeHistory removes duplicates by role:message_id, keeps all without id", () => {
     const h = [
       { role: "user", content: "a", meta: { message_id: 1 } },
-      { role: "user", content: "a2", meta: { message_id: 1 } }, // дубль
-      { role: "assistant", content: "b", meta: { message_id: 1 } }, // другая роль — не дубль
+      { role: "user", content: "a2", meta: { message_id: 1 } }, // duplicate
+      { role: "assistant", content: "b", meta: { message_id: 1 } }, // different role — not a duplicate
       { role: "user", content: "noid" },
       { role: "user", content: "noid2" },
     ];
@@ -238,10 +238,10 @@ describe("история — обслуживание", () => {
     assert.equal(out[1].content, "b");
   });
 
-  test("collapseConsecutiveDuplicates схлопывает подряд идущие одинаковые", () => {
+  test("collapseConsecutiveDuplicates collapses consecutive identical items", () => {
     const h = [
       { role: "user", content: "Привет" },
-      { role: "assistant", content: " привет " }, // тот же текст (норм.) — схлоп
+      { role: "assistant", content: " привет " }, // same text (normalized) — collapsed
       { role: "user", content: "пока" },
       { role: "user", content: "пока" },
       { role: "user", content: "пока?" },
@@ -250,42 +250,42 @@ describe("история — обслуживание", () => {
     assert.deepEqual(out.map(x => x.content), ["Привет", "пока", "пока?"]);
   });
 
-  test("historyChars суммирует длины content", () => {
+  test("historyChars sums up content lengths", () => {
     assert.equal(historyChars([{ content: "abc" }, { content: "de" }, {}]), 5);
     assert.equal(historyChars(null), 0);
   });
 
-  test("trimHistoryByChars оставляет хвост в пределах бюджета, целыми сообщениями", () => {
+  test("trimHistoryByChars keeps the tail within budget, whole messages only", () => {
     const h = [
       { content: "a".repeat(100) },
       { content: "b".repeat(100) },
       { content: "c".repeat(100) },
     ];
     const out = trimHistoryByChars(h, 150);
-    // идём с конца: c(100) → total 100 < 150; b(100) → total 200 >= 150, включаем и стоп
+    // go from the end: c(100) → total 100 < 150; b(100) → total 200 >= 150, include and stop
     assert.deepEqual(out.map(x => x.content[0]), ["b", "c"]);
   });
 
-  test("trimHistoryByChars: невалидный лимит → дефолт 8000; жёсткий потолок по числу", () => {
+  test("trimHistoryByChars: invalid limit → default 8000; hard item-count cap", () => {
     const many = Array.from({ length: HISTORY_HARD_CAP_ITEMS + 50 }, (_, i) => ({ content: "x" }));
-    const out = trimHistoryByChars(many, 0); // 0 → дефолт 8000, но потолок по числу сработает
+    const out = trimHistoryByChars(many, 0); // 0 → default 8000, but the item-count cap kicks in
     assert.ok(out.length <= HISTORY_HARD_CAP_ITEMS);
   });
 });
 
 
-describe("аудит: telegram/markdown/utils", () => {
-  test("toMarkdownV2: спойлер с переносом → текст; незакрытый ``` → жадный инлайн-код", () => {
+describe("audit: telegram/markdown/utils", () => {
+  test("toMarkdownV2: spoiler with a line break → text; unclosed ``` → greedy inline code", () => {
     assert.equal(toMarkdownV2("||a\nb||"), "\\|\\|a\nb\\|\\|");
-    // незакрытый блок: первые два ` схлопываются в пустой инлайн-код ``, третий ` экранируется
+    // unclosed block: the first two ` collapse into empty inline code ``, the third ` is escaped
     assert.equal(toMarkdownV2("```abc"), "``\\`abc");
   });
-  test("sendTelegramMessage: обе попытки провалились → null", async () => {
+  test("sendTelegramMessage: both attempts failed → null", async () => {
     let n = 0;
     FETCH.set("send", () => { n++; if (n === 1) return jsonResp({ ok: false, description: "bad" }); throw new Error("network"); });
     assert.equal(await sendTelegramMessage("123:T", 1, "текст", undefined), null);
   });
-  test("sendAndStore: 3 части отправлены, в историю один ответ целиком", async () => {
+  test("sendAndStore: 3 parts sent, one whole reply in history", async () => {
     const ctx = makeCtxFor(makeMsg({ message_id: 1 }), makeEnv());
     const big = "a".repeat(Math.floor(TELEGRAM_MSG_LIMIT * 2.5));
     await sendAndStore(ctx, big);
@@ -293,10 +293,10 @@ describe("аудит: telegram/markdown/utils", () => {
     assert.equal(ctx.chatData.history.length, 1);
     assert.equal(ctx.chatData.history[0].content.length, big.length);
   });
-  test("getUserMeta: без фото нет photo_key", () => {
+  test("getUserMeta: no photo_key without a photo", () => {
     assert.ok(!("photo_key" in getUserMeta(makeMsg({ text: "plain" }))));
   });
-  test("lastToken: эмодзи-суффикс игнорируется", () => {
+  test("lastToken: emoji suffix is ignored", () => {
     assert.equal(lastToken("привет мир🎉"), "мир");
   });
 });
