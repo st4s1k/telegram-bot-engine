@@ -2,7 +2,7 @@
   // Generic-конфиг ДВИЖКА (шаблон). Сам движок НЕ деплоится — деплоит проект-пак, который
   // потребляет движок и держит СВОЙ wrangler.jsonc с реальными id/именами ресурсов.
   // Здесь — плейсхолдеры (для wrangler types / локального dev форка). Подставь свои id.
-  "name": "telegram-chat-bot",
+  "name": "telegram-bot-engine",
   "main": "src/index.ts",
   "compatibility_date": "2025-10-31",
   "observability": { "enabled": true },
@@ -19,11 +19,11 @@
     { "binding": "KV", "id": "REPLACE_WITH_YOUR_KV_ID" }
   ],
   "d1_databases": [
-    { "binding": "DB", "database_name": "telegram-chat-bot-db", "database_id": "REPLACE_WITH_YOUR_D1_ID" }
+    { "binding": "DB", "database_name": "telegram-bot-engine-db", "database_id": "REPLACE_WITH_YOUR_D1_ID" }
   ],
   "ai": { "binding": "AI" },
   "vectorize": [
-    { "binding": "VECTORIZE", "index_name": "telegram-chat-bot-memory" }
+    { "binding": "VECTORIZE", "index_name": "telegram-bot-engine-memory" }
   ],
   "triggers": {
     "crons": ["0 5 * * *", "0 6 * * *"]

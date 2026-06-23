@@ -1,5 +1,5 @@
 {
-  "name": "telegram-chat-bot",
+  "name": "telegram-bot-engine",
   "version": "0.0.0",
   "private": true,
   "type": "module",

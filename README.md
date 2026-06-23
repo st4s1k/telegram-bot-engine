@@ -1,4 +1,4 @@
-# telegram-chat-bot — a Telegram ↔ LLM bot engine
+# telegram-bot-engine — a Telegram ↔ LLM bot engine
 
 A reusable **Telegram bot engine** on **Cloudflare Workers**: a bridge between a Telegram webhook
 and **OpenRouter** (LLM), plus per-chat config, long-term memory (RAG), summaries, vision, dedup and
