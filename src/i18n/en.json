@@ -228,5 +228,9 @@
   "vis_runvision_capt": "The photo has a caption: \"{0}\". Describe the photo and reply.",
   "vis_runvision": "Describe the photo and reply.",
 
+  "lang_status": "🌐 Language: {0}. Available: {1}.\nChange: `/lang <code>`",
+  "lang_set": "✅ Language set: {0}",
+  "lang_unknown": "⚠️ Unknown language `{0}`. Available: {1}",
+
   "vision_hd_default": ["zoom"]
 }

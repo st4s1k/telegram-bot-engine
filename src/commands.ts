@@ -3,7 +3,7 @@
 // their output is NOT written to history; LLM_COMMANDS — content commands (with "typing", stored).
 
 import { MEM_MAX_FACT_CHARS } from "./constants";
-import { t, tList } from "./i18n";
+import { t, tList, LOCALES } from "./i18n";
 import {
   makeCtx, parseCommandAndArg, historyChars, tzParts,
 } from "./utils";
@@ -451,6 +451,17 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
     }
     return text;
   },
+
+  // /lang [code] — switch the UI language, or (no arg) show the current + available ones. The locale set
+  // is DISCOVERED from the i18n folders (LOCALES) — no language is hardcoded. Reply is in the new language.
+  lang: async (ctx, mode) => {
+    const cur = ctx.cfg.lang;
+    const arg = (mode.argText || "").trim().toLowerCase();
+    if (!arg) return t(cur, "lang_status", cur, LOCALES.join(", "));
+    if (!LOCALES.includes(arg)) return t(cur, "lang_unknown", arg, LOCALES.join(", "));
+    saveChatConfig(ctx, { ...ctx.chatData.config, lang: arg });
+    return t(arg, "lang_set", arg);
+  },
 };
 
 // The engine's core commands — self-describing plugins (the SAME RegisteredCommand contract as the persona):
@@ -468,6 +479,7 @@ const ENGINE_COMMAND_PLUGINS: RegisteredCommand[] = [
   { type: "info",    defaultCmd: "/info",    skipHistory: true, handler: ENGINE_COMMANDS.info },
   { type: "stop",    defaultCmd: "/stop",    skipHistory: true, handler: ENGINE_COMMANDS.stop },
   { type: "resume",  defaultCmd: "/resume",  skipHistory: true, handler: ENGINE_COMMANDS.resume },
+  { type: "lang",    defaultCmd: "/lang",    skipHistory: true, handler: ENGINE_COMMANDS.lang },
 ];
 // Register the core in the registry — now the engine and the pack are a single plugin list (getAllCommands).
 setEngineCommands(ENGINE_COMMAND_PLUGINS);

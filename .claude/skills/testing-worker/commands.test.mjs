@@ -56,6 +56,14 @@ describe("COMMANDS.rp / stop / resume / info", () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     assert.match(await COMMANDS.info(ctx, { argText: "" }), /🎭/); // info panel role line — locale-neutral marker
   });
+  test("lang shows + switches the UI language; rejects an unknown one", async () => {
+    const ctx = makeCtxFor(makeMsg(), makeEnv());
+    const status = await COMMANDS.lang(ctx, { argText: "" });
+    assert.match(status, /en/); assert.match(status, /ru/);     // available locales, discovered from the folder
+    await COMMANDS.lang(ctx, { argText: "en" });
+    assert.equal(ctx.chatData.config.lang, "en");               // switched
+    assert.match(await COMMANDS.lang(ctx, { argText: "zz" }), /Неизвестн|Unknown/); // not a discovered locale
+  });
 });
 
 

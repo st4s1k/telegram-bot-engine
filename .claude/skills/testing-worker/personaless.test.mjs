@@ -68,7 +68,7 @@ describe("personaless (neutral pack)", () => {
 
   test("buildCommandRegex: without a persona — only engine commands", () => {
     const types = buildCommandRegex(makeEnv(), "neutral_probe_bot").map((e) => e.type);
-    const ENGINE = ["admin", "help", "config", "memory", "model", "summary", "rp", "info", "stop", "resume"];
+    const ENGINE = ["admin", "help", "config", "memory", "model", "summary", "rp", "info", "stop", "resume", "lang"];
     for (const t of ENGINE) assert.ok(types.includes(t), `engine command ${t} must be present`);
     // and NOTHING beyond the engine: with no registered persona, no extra commands appear
     assert.deepEqual(types.slice().sort(), ENGINE.slice().sort());

@@ -6,19 +6,22 @@
 // A persona merges its own per-locale strings in via addLocaleStrings (called from setPersona), so
 // persona-supplied keys (e.g. config descriptions / group titles) resolve through t() like engine keys.
 
-import ru from "./ru.json";
-import en from "./en.json";
+import { ENGINE_TABLES, PERSONA_TABLES } from "./_generated";
 
 // The default/fallback UI language. English: the public engine defaults to English for any deployment
 // that does not set BOT_LANG. A localized deployment (e.g. the «Фасол» bot) opts into its language via
-// env BOT_LANG / per-chat `/config lang`.
+// env BOT_LANG / per-chat `/config lang` (or `/lang`).
 export const DEFAULT_LANG = "en";
 
-// A locale value is a single string, or an array of lines for a multi-line prompt (joined with \n).
-const MESSAGES: Record<string, Record<string, string | string[]>> = { ru, en };
+// Locale tables are DISCOVERED from the i18n folders (scripts/select-persona.mjs generates the imports):
+// the engine's src/i18n/*.json, with the active persona's i18n/*.json merged on top per locale. The code
+// hardcodes NO language list — drop a <code>.json into a folder and that locale becomes available.
+// A value is a single string, or an array of lines for a multi-line prompt (joined with \n).
+const MESSAGES: Record<string, Record<string, string | string[]>> = {};
+for (const [lang, table] of Object.entries(ENGINE_TABLES)) MESSAGES[lang] = { ...table };
+for (const [lang, table] of Object.entries(PERSONA_TABLES)) MESSAGES[lang] = { ...(MESSAGES[lang] || {}), ...table };
 
-// Available UI locales (for /config lang validation / help). Add a JSON file + an entry here to extend,
-// or a persona adds its own via addLocaleStrings (which keeps this list current).
+// Available UI locales (for /lang validation + listing), derived from the discovered tables.
 export const LOCALES: string[] = Object.keys(MESSAGES);
 
 // Merge a persona's per-locale string table into the engine's locale tables, so persona-supplied keys

@@ -175,6 +175,8 @@ _load_*.mjs
 # active.ts и _pack/ — генерируемые, в гит не коммитятся. Без PERSONA_PACK движок нейтральный.
 src/persona/active.ts
 src/persona/_pack/
+# i18n-манифест генерируется тем же скриптом (локали обнаруживаются по файлам в i18n-папках).
+src/i18n/_generated.ts
 # Персона-специфичные тесты приходят из репо пака (стейджятся рядом), в движок не коммитятся.
 .claude/skills/testing-worker/*.persona.test.mjs
 
