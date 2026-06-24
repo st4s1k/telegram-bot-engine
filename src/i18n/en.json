@@ -7,6 +7,8 @@
   "info_history": "💬 History: {0} msgs / {1} chars (limit {2})",
   "info_overrides": "⚙️ Custom settings: {0}",
   "info_footer": "Settings: /config • Commands: /help",
+  "info_features": "⚙️ Memory: {0} · 👁 Vision: {1} · 🗓 Daily: {2}",
+  "info_lang": "🌐 Language: {0}",
 
   "prompt_rag_intro": "Below are fragments from OLDER chat history that surfaced by relevance. This is reference memory context (NOT new messages): don't reply to it directly and don't copy it verbatim — just take it into account if relevant.",
   "prompt_tag_instruction": "In the history, every message is tagged [from:Name; DATE TIME] (times are in the {0} timezone). This is a service tag — do NOT copy it into your reply and do NOT start your reply with [from:...]. When referring to something said earlier, cite the DATE/TIME, NOT internal message numbers.",
@@ -246,6 +248,8 @@
   "alias_empty": "No aliases set. Add one: `/alias @username Name`",
   "alias_list_header": "🔖 *Name aliases* (this chat)",
   "alias_usage": "Usage: `/alias @username Name` · `/alias` (list) · `/alias del @username`",
+
+  "help_start": ["👋 Hi! I'm a chat bot — message me and I'll reply.", "• `/help` — all commands", "• `/config` — settings (memory, vision, language…)", "_In groups I answer on an @mention or my wake-word, and sometimes chime in. `/lang` switches language._"],
 
   "help_engine": [
     "🤖 **Commands**",

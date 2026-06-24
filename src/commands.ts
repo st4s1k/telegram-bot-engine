@@ -25,6 +25,9 @@ type CommandHandler = (ctx: Ctx, mode: CommandMode) => Promise<string | null>;
 const ENGINE_COMMANDS: Record<string, CommandHandler> = {
   help: async (ctx) => buildHelp(ctx.cfg.lang),
 
+  // /start — first-contact onboarding (Telegram auto-sends it on first open). Localized, no LLM call.
+  start: async (ctx) => t(ctx.cfg.lang, "help_start"),
+
   config: async (ctx, mode) => {
     const lang = ctx.cfg.lang;
     const raw = mode.argText.trim();
@@ -554,6 +557,7 @@ const ENGINE_COMMAND_PLUGINS: RegisteredCommand[] = [
   { type: "resume",  defaultCmd: "/resume",  skipHistory: true, handler: ENGINE_COMMANDS.resume },
   { type: "lang",    defaultCmd: "/lang",    skipHistory: true, handler: ENGINE_COMMANDS.lang },
   { type: "alias",   defaultCmd: "/alias",   skipHistory: true, handler: ENGINE_COMMANDS.alias },
+  { type: "start",   defaultCmd: "/start",   skipHistory: true, handler: ENGINE_COMMANDS.start },
 ];
 // Register the core in the registry — now the engine and the pack are a single plugin list (getAllCommands).
 setEngineCommands(ENGINE_COMMAND_PLUGINS);

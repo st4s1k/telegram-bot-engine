@@ -286,6 +286,10 @@ export function buildInfoStatus(ctx: Ctx): string {
   msg += `${status}\n`;
   msg += t(lang, "info_model", cfg.openrouterModel) + "\n";
   msg += t(lang, "info_history", histLen, histChars, cfg.history_chars) + "\n";
+  msg += t(lang, "info_features", t(lang, cfg.rag ? "cfg_on" : "cfg_off"), t(lang, cfg.vision ? "cfg_on" : "cfg_off"), t(lang, cfg.daily_summary ? "cfg_on" : "cfg_off")) + "\n";
+  msg += t(lang, "info_lang", lang) + "\n";
+  const spend = Number(chatData.spend) || 0;
+  if (spend > 0) msg += t(lang, "model_spent", spend.toFixed(4), chatData.spendCount || 0) + "\n";
   msg += t(lang, "info_overrides", overrides) + "\n\n";
   msg += t(lang, "info_footer");
   return msg;
