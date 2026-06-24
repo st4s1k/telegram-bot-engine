@@ -45,6 +45,7 @@ names are fixed by the engine/pack (there is no env-based renaming).
 | `/model` `[id]` / `vision <id>` / `summary <id>` / `reset` | Model(s), price, balance; switch/reset. |
 | `/memory` `add` / `list` / `del N` / `forget` / `dedupe` / `size_chars N` | Long-term memory + history. |
 | `/lang` `[code]` / — | Show the current UI language + available locales, or switch (unknown code is rejected). |
+| `/alias` `@user Name` / `del @user` / — | Set / remove / list per-chat display-name aliases (`username → name`). |
 | `/stop` · `/resume` | Pause (commands only) and resume. |
 
 > `/admin` is a **hidden** command (only usernames in `ADMIN_USERNAMES`, private chats only): inspect
@@ -62,7 +63,7 @@ through the registry `src/persona/registry.ts` (`setPersona`/`getPersona` + gett
 | Part | What it provides |
 |---|---|
 | `wakeWords` | words that wake the bot in groups (substring, any case) — part of the pack's non-localized identity |
-| `usernameAliases` | `username (lowercase, no @) → display name` overrides |
+| `usernameAliases` | pack-static `username (lowercase, no @) → display name` defaults (per-chat `/alias` entries merge **over** them — see below) |
 | `commands` | extra commands (`{type, defaultCmd, handler, llm?, skipHistory?, state?}`) |
 | `quickReplies` | trigger replies (substring / token table, gated by `cfgFlag`×`probKey`); `responses`/`tokenTable` values are **i18n keys** resolved per `cfg.lang` (see below) |
 | `randomThrows` | random "throws" (weighted pick) |
@@ -125,6 +126,9 @@ returns a single string or `undefined` (with lang→default fallback).
   code is **rejected** (the language stays unchanged), not silently accepted.
 - **Persona texts** are localized in the **pack's own `i18n/<lang>.json` folder** (merged into the engine
   i18n by the generate step), so the personality is multilingual independently of the engine UI language.
+- **Name aliases:** per-chat aliases (set by `/alias`, stored in the reserved `chats.config.aliases` object)
+  merge **over** the pack-static `usernameAliases` in the name resolvers (`resolveUserName`), so a `/alias`
+  also fixes the `[from:Name]` tag the model sees in history (not just displayed `/dice`-style names).
 - **Neutral / personaless fallbacks** are engine i18n keys (`neutral_fallback_error`,
   `neutral_fallback_no_credits`, `neutral_target_name`, `neutral_info_title`), so a no-pack deployment
   still localizes per `cfg.lang`. Other engine-only strings follow suit: `/config` booleans render via
@@ -163,7 +167,7 @@ registration.
 - **D1** (`DB`) — primary store: one state row per chat + one row per message.
 - **Vectorize** + **Workers AI** — long-term memory (RAG, curated facts).
 - **KV** (`KV`) — technical update-dedup flags (`dedup:*`).
-- **Vitest** — offline tests (~312 neutral / ~360 with a pack) on a real D1 (`node:sqlite` shim) +
+- **Vitest** — offline tests (~315 neutral / ~364 with a pack) on a real D1 (`node:sqlite` shim) +
   mocked `fetch` / SSE / AI / Vectorize.
 
 ## Layout (`src/`)
@@ -197,7 +201,7 @@ registers them via `setEngineCommands`, and `getAllCommands()` = engine ∪ pers
 
 ```bash
 npm install
-npm test                          # vitest run — offline, neutral pack (~312 core tests)
+npm test                          # vitest run — offline, neutral pack (~315 core tests)
 PERSONA_PACK=../my-pack npm test  # with a pack (+ copy its tests/*.persona.test.mjs next to the core tests)
 npm run typecheck                 # tsc --noEmit (strict); npm run check is an alias
 npm run dev                       # wrangler dev — local run
