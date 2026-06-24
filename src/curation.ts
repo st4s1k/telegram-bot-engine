@@ -3,7 +3,7 @@
 // (id > boundary) and store them in RAG. Under cfg.rag, best-effort (an error does not break the reply/summary).
 // Called once a day (cron) and before the /summary command — NOT on every bot reply.
 
-import { MEM_CURATION_MIN_NEW, MEM_MAX_FACTS_PER_RUN, MEM_MAX_FACT_CHARS } from "./constants";
+import { MEM_CURATION_MIN_NEW, MEM_MAX_FACTS_PER_RUN, MEM_MAX_FACT_CHARS, MEM_MAX_TOKENS } from "./constants";
 import { messagesSince, addMemory, listMemories } from "./storage";
 import { runLLMWithHistory } from "./llm";
 import { buildMemoryExtractionPrompt } from "./prompts";
@@ -61,7 +61,8 @@ export async function runMemoryCuration(ctx: Ctx): Promise<void> {
       userItems,                             // only new interlocutor messages
       t(ctx.cfg.lang, "mem_extract_user_turn"),
       ctx.msg,
-      { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel }
+      // Auxiliary call: tight response cap + reasoning off (≤5 short facts; no chain-of-thought needed).
+      { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel, maxTokens: MEM_MAX_TOKENS, reasoning: false }
     );
     if (isFallbackMessage(out)) return; // LLM error/timeout → don't advance the boundary (retried on the next reply)
     // Dedup is best-effort in-process (against existing + within the batch). A rare race-condition duplicate on

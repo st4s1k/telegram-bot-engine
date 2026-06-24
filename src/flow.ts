@@ -142,7 +142,9 @@ export async function handleChatMessage(ctx: Ctx): Promise<void> {
 
   // Long-term memory (RAG): mix in relevant old messages only into the regular reply
   // (default) and only if enabled. Content throws from the pack don't use memory.
-  const memories = (kind === "default" && ctx.cfg.rag && ctx.textRaw)
+  // Skip the embed + vector query for trivially short messages ("ok", an emoji) — they can't clear
+  // rag_min_score anyway, so don't pay the Workers-AI embed + Vectorize round-trip on the hot reply path.
+  const memories = (kind === "default" && ctx.cfg.rag && (ctx.textRaw || "").trim().length >= 4)
     ? await ragRetrieveMemories(ctx, ctx.textRaw)
     : [];
 

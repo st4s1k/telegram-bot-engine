@@ -143,13 +143,16 @@ export function asciiHeader(v: string): string {
 export async function callOpenRouter(
   cfg: BotConfig,
   messages: LLMMessage[],
-  { tag = "req", extraLog = {}, ctx = null, modelOverride = "" }: {
-    tag?: string; extraLog?: Record<string, unknown>; ctx?: Ctx | null; modelOverride?: string;
+  { tag = "req", extraLog = {}, ctx = null, modelOverride = "", maxTokens, reasoning }: {
+    tag?: string; extraLog?: Record<string, unknown>; ctx?: Ctx | null; modelOverride?: string; maxTokens?: number; reasoning?: boolean;
   } = {},
 ): Promise<string> {
   const rid = newReqId();
   const model = modelOverride || cfg.openrouterModel;
   const fb = getPersonaTexts(cfg.lang); // persona fallbacks in the needed locale (the pack is already registered)
+  // Per-call overrides (auxiliary calls — summary/curation — pass a tight cap + reasoning off); else cfg.
+  const maxTok = maxTokens ?? cfg.maxTokens;
+  const useReasoning = reasoning ?? cfg.reasoning;
   const payload = {
     model,
     messages,
@@ -161,11 +164,11 @@ export async function callOpenRouter(
     // Controlling the "thinking" of reasoning models:
     //  - reasoning on (default): it thinks, but we don't send the reasoning tokens (exclude).
     //  - reasoning off: enabled:false disables the generation of reasoning (faster).
-    reasoning: cfg.reasoning ? { exclude: true } : { enabled: false },
+    reasoning: useReasoning ? { exclude: true } : { enabled: false },
     // Response length limit. We add the field only for a valid value > 0 — otherwise let
     // the model use its own default. Guards against overly long responses (but not against slow
     // reasoning itself).
-    ...(Number.isFinite(cfg.maxTokens) && cfg.maxTokens > 0 ? { max_tokens: cfg.maxTokens } : {}),
+    ...(Number.isFinite(maxTok) && maxTok > 0 ? { max_tokens: maxTok } : {}),
     // We ask OpenRouter to return usage with the actual cost (it arrives in the final chunk).
     usage: { include: true },
   };
@@ -273,11 +276,11 @@ export async function runLLMWithHistory(
   history: HistoryItem[],
   userContent: string,
   msg: TgMessage,
-  { forceAppendUser = false, ctx = null, modelOverride = "" }: { forceAppendUser?: boolean; ctx?: Ctx | null; modelOverride?: string } = {},
+  { forceAppendUser = false, ctx = null, modelOverride = "", maxTokens, reasoning }: { forceAppendUser?: boolean; ctx?: Ctx | null; modelOverride?: string; maxTokens?: number; reasoning?: boolean } = {},
 ): Promise<string> {
   const messages = toLLMMessages(systemPrompt, history, userContent, msg, { forceAppendUser, tz: cfg.timezone });
   // modelOverride empty → callOpenRouter takes cfg.openrouterModel (normal behavior).
-  return callOpenRouter(cfg, messages, { tag: "req", extraLog: { count: messages.length }, ctx, modelOverride });
+  return callOpenRouter(cfg, messages, { tag: "req", extraLog: { count: messages.length }, ctx, modelOverride, maxTokens, reasoning });
 }
 
 export function toLLMMessages(

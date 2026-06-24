@@ -35,3 +35,5 @@ export const RAG_TIMEOUT_MS = 8_000;       // ceiling on waiting for embed/query
 export const MEM_CURATION_MIN_NEW = 2;     // don't run extraction while there are fewer new messages
 export const MEM_MAX_FACTS_PER_RUN = 5;    // maximum facts per single extraction pass
 export const MEM_MAX_FACT_CHARS = 300;     // truncate the length of a single fact
+export const MEM_MAX_TOKENS = 500;         // response cap for fact extraction (auxiliary call — ≤5 short facts)
+export const SUMMARY_MAX_TOKENS = 1000;    // response cap for the /summary digest (auxiliary call)

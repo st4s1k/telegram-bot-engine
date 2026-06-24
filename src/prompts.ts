@@ -48,7 +48,9 @@ export function buildPhotoFromCachePrompt(desc: string, ctx: Ctx): string {
 export function buildMemoryExtractionPrompt(lang: string, existing: string[] = []): string {
   const lines = [t(lang, "mem_extract", MEM_MAX_FACTS_PER_RUN)];
   if (existing.length) {
-    lines.push(t(lang, "mem_extract_known"), ...existing.slice(0, 50).map(f => `- ${f}`));
+    // Inject only the RECENT facts as a dedup hint (bounds prompt tokens); parseExtractedFacts still
+    // dedups the model's OUTPUT against the FULL existing set the caller passes.
+    lines.push(t(lang, "mem_extract_known"), ...existing.slice(-40).map(f => `- ${f}`));
   }
   return lines.join("\n");
 }

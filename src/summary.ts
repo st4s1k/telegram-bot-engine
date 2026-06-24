@@ -3,6 +3,7 @@
 // the previous summary (_summary) as "already known — don't repeat". Shared core for the /summary command
 // and the daily cron. On success it updates _summary (+_dirty); the caller advances the BOUNDARY.
 
+import { SUMMARY_MAX_TOKENS } from "./constants";
 import { messagesSince } from "./storage";
 import { runLLMWithHistory } from "./llm";
 import { buildSummaryPrompt } from "./prompts";
@@ -32,7 +33,8 @@ export async function runIncrementalSummary(
     t(ctx.cfg.lang, "sum_user_turn"),
     ctx.msg,
     // A separate model for the summary (if set) — usually a fast one. Empty → the main model.
-    { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel }
+    // Auxiliary call: tight response cap + reasoning off (a digest needs neither 4000 tokens nor chain-of-thought).
+    { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel, maxTokens: SUMMARY_MAX_TOKENS, reasoning: false }
   );
 
   if (isFallbackMessage(summary)) return { text: summary, maxId: sinceId, hadNew: false };
