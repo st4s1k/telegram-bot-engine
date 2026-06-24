@@ -258,9 +258,11 @@ Configured **per chat** (`/config <key> <value>`). Booleans — `on`/`off`; prob
 | `rag` · `rag_top_k` · `rag_min_score` | bool/int/float | Long-term memory: on, how many facts, similarity threshold |
 | `daily_summary` | bool | Daily summary at 08:00 (in the configured `BOT_TZ`, default UTC) |
 | `lang` | string | UI language for this chat — any discovered locale; an unknown code is rejected |
+| `timezone` | string | Per-chat IANA timezone (e.g. `Europe/Berlin`) for timestamps + `/summary` times; overrides `BOT_TZ` |
 
-Fun keys (triggers/throws/their probabilities) are added by the persona pack — see its repo. The
-timezone is deployment-wide (`BOT_TZ` env), not a per-chat key.
+Fun keys (triggers/throws/their probabilities) are added by the persona pack — see its repo. `BOT_TZ` is
+the default timezone; a chat can override it with `/config timezone` (the daily-summary *delivery* time
+stays deployment-wide — the cron fires at 08:00 in `BOT_TZ`).
 
 ### Admins
 

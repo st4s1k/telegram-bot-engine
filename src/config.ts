@@ -39,6 +39,9 @@ const ENGINE_CONFIG_SCHEMA: Record<string, ConfigMeta> = {
 
   // --- LANGUAGE (UI) ---
   "lang":     { type: "string", desc: "cfg_desc_lang", max: 5 },
+
+  // --- TIMEZONE --- per-chat IANA tz for history timestamps + /summary times; overrides the env BOT_TZ.
+  "timezone": { type: "string", desc: "cfg_desc_timezone", max: 64 },
 };
 
 // CONFIG_SCHEMA = engine ∪ persona (switches/probabilities come from the pack). Key order does not
@@ -54,7 +57,7 @@ const ENGINE_CONFIG_GROUPS: Record<string, string[]> = {
   "cfg_group_vision": ["vision"],
   "cfg_group_thinking": ["reasoning", "max_tokens"],
   "cfg_group_rag": ["rag", "rag_top_k", "rag_min_score"],
-  "cfg_group_daily": ["daily_summary"],
+  "cfg_group_daily": ["daily_summary", "timezone"],
   "cfg_group_lang": ["lang"],
 };
 export const CONFIG_GROUPS: Record<string, string[]> = { ...ENGINE_CONFIG_GROUPS, ...(getPersonaConfig().groups || {}) };
@@ -253,6 +256,11 @@ export function setConfigParam(ctx: Ctx, key: string, rawVal: string): string {
   // "author/slug"-ish shape so junk is rejected with a clean error instead of an odd outbound request.
   if (["model", "vision_model", "summary_model"].includes(key) && parsed.value && !/^[\w.@:\/-]+$/.test(String(parsed.value))) {
     return t(lang, "cfg_set_error", t(lang, "cfg_err_model"), key);
+  }
+  // `timezone` must be a valid IANA id — otherwise the Intl formatter silently falls back to UTC.
+  if (key === "timezone" && parsed.value) {
+    try { new Intl.DateTimeFormat("en-US", { timeZone: String(parsed.value) }); }
+    catch { return t(lang, "cfg_set_error", t(lang, "cfg_err_tz"), key); }
   }
 
   const newConf: ChatConfig = { ...ctx.chatData.config, [key]: parsed.value };
