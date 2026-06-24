@@ -17,7 +17,7 @@ const {
   PHOTO_DELIM,
   DEFAULT_CHAT_DATA, getChatData, flushChatData, updatePersonaState, setRole, setPaused, saveChatConfig,
   addSpend, cachePhotoDesc, PHOTO_CACHE_CAP,
-  callOpenRouter, runLLMWithHistory, toLLMMessages, formatWithMeta, asciiHeader,
+  callOpenRouter, runLLMWithHistory, toLLMMessages, formatWithMeta, linkifySummaryTimes, asciiHeader,
   fetchModelPrice, fetchOpenRouterUsage,
   getTelegramPhotoUrl, runVision, handlePhotoMessage, describeCtxPhoto, getReplySource,
   logIgnoredPhoto,
@@ -42,6 +42,20 @@ describe("utilities", () => {
     assert.equal(lastToken("ну, пока..."), "пока");
     assert.equal(lastToken(""), "");
     assert.equal(lastToken("!!!"), "");
+  });
+
+  test("linkifySummaryTimes: supergroup HH:MM → message deep-link; unmapped/non-supergroup stay plain", () => {
+    const items = [
+      { role: "user", content: "a", meta: { message_id: 11, ts: Date.UTC(2026, 5, 24, 10, 25) } },
+      { role: "user", content: "b", meta: { message_id: 12, ts: Date.UTC(2026, 5, 24, 10, 40) } },
+    ];
+    const out = linkifySummaryTimes("обсуждали 10:25–10:40, а 09:00 — нет", items, -1001234567890, "UTC");
+    assert.match(out, /\[10:25\]\(https:\/\/t\.me\/c\/1234567890\/11\)/);
+    assert.match(out, /\[10:40\]\(https:\/\/t\.me\/c\/1234567890\/12\)/); // interval — both ends linked
+    assert.ok(!/\[09:00\]\(/.test(out)); // not in the summarized window → left plain
+    // non-supergroup (private id / basic group -id without -100) → no per-message links → unchanged
+    assert.equal(linkifySummaryTimes("в 10:25 что-то", items, 555, "UTC"), "в 10:25 что-то");
+    assert.equal(linkifySummaryTimes("в 10:25 что-то", items, -123456, "UTC"), "в 10:25 что-то");
   });
 
   test("pickOne returns an array element (deterministically via random)", () => {

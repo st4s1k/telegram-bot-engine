@@ -39,7 +39,7 @@ names are fixed by the engine/pack (there is no env-based renaming).
 |---|---|
 | `/help` | Command list: the engine renders its base list and **appends** the active pack's help section below it. |
 | `/info` | Chat status: role, active model, history size, number of custom settings. |
-| `/summary` | Incremental "what's new" LLM digest since the last call (needs a few new messages). |
+| `/summary` | Incremental "what's new" LLM digest since the last call (needs a few new messages). In supergroups its `HH:MM` timestamps become tap-to-jump links to the message at that minute. |
 | `/rp` `<description>` / `off` / — | Set / clear / show the chat role. |
 | `/config` `[key value]` / `reset` | Show or change chat settings (see [keys](#config-keys)). |
 | `/model` `[id]` / `vision <id>` / `summary <id>` / `reset` | Model(s), price, balance; switch/reset. |

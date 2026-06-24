@@ -6,7 +6,7 @@
 import { messagesSince } from "./storage";
 import { runLLMWithHistory } from "./llm";
 import { buildSummaryPrompt } from "./prompts";
-import { isFallbackMessage } from "./utils";
+import { isFallbackMessage, linkifySummaryTimes } from "./utils";
 import { t } from "./i18n";
 import type { Ctx } from "./types";
 
@@ -36,7 +36,8 @@ export async function runIncrementalSummary(
   );
 
   if (isFallbackMessage(summary)) return { text: summary, maxId: sinceId, hadNew: false };
-  ctx.chatData._summary = summary;
+  ctx.chatData._summary = summary; // store the RAW digest (fed back as "already known" context next time)
   ctx.chatData._dirty = true;
-  return { text: summary, maxId, hadNew: true };
+  // …but SHOW it with HH:MM timestamps linkified to the messages they reference (supergroups only).
+  return { text: linkifySummaryTimes(summary, items, ctx.chatId, ctx.cfg.timezone), maxId, hadNew: true };
 }

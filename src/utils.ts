@@ -288,6 +288,32 @@ export function formatWithMeta(item: HistoryItem, tz: string = "UTC"): string {
   return `[from:${m.name || "user"}${when}]\n${item.content || ""}`;
 }
 
+// Make HH:MM timestamps inside a /summary digest clickable: each maps to a Telegram message deep-link
+// (t.me/c/<id>/<msg_id>) jumping to the message sent at that minute. Telegram message links only exist in
+// SUPERGROUPS (chat_id like -100…) — in private chats / basic groups there are none, so the text is
+// returned unchanged. The minute→message_id map is built from `items` (the summarized messages, same `tz`
+// the model saw); a time with no message at that minute stays plain. Output is lightweight Markdown links
+// that sendTelegramMessage's toMarkdownV2 preserves.
+export function linkifySummaryTimes(text: string, items: HistoryItem[], chatId: number | string, tz: string = "UTC"): string {
+  const sg = String(chatId).match(/^-100(\d+)$/);
+  if (!sg) return text;                       // not a supergroup → no per-message deep-links
+  const internal = sg[1];
+  const byMinute: Record<string, number> = {}; // "HH:MM" → first message_id at that minute
+  for (const it of items) {
+    const id = it.meta?.message_id;
+    const ts = it.meta?.ts;
+    if (!id || !ts) continue;
+    const hhmm = tzStamp(ts, tz).slice(11);     // "YYYY-MM-DD HH:MM" → "HH:MM"
+    if (!(hhmm in byMinute)) byMinute[hhmm] = id;
+  }
+  if (!Object.keys(byMinute).length) return text;
+  // Link each HH:MM (1–2 digit hour); intervals like "10:25–10:40" linkify both ends independently.
+  return text.replace(/\b(\d{1,2}):(\d{2})\b/g, (whole, h: string, mm: string) => {
+    const id = byMinute[`${h.padStart(2, "0")}:${mm}`];
+    return id ? `[${whole}](https://t.me/c/${internal}/${id})` : whole;
+  });
+}
+
 // The bot's technical fallbacks (LLM errors). We don't save them to the history.
 export function isFallbackMessage(text: string): boolean {
   return getAllFallbackTexts().includes(String(text).trim());
