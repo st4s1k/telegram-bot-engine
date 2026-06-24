@@ -159,6 +159,15 @@ describe("COMMANDS.model", () => {
     assert.equal(ctx.chatData.config.summary_model, "google/gemini-3.5-flash");
     assert.match(out, /установлен/i);
   });
+  test("/model reset clears ALL models (main + vision + summary), keeps other settings", async () => {
+    const cd = { ...DEFAULT_CHAT_DATA(), config: { model: "a/b", vision_model: "v/m", summary_model: "s/m", random: false } };
+    const ctx = makeCtxFor(makeMsg(), makeEnv(), cd);
+    await COMMANDS.model(ctx, { argText: "reset" });
+    assert.equal(ctx.chatData.config.model, undefined);
+    assert.equal(ctx.chatData.config.vision_model, undefined);
+    assert.equal(ctx.chatData.config.summary_model, undefined);
+    assert.equal(ctx.chatData.config.random, false); // other settings kept
+  });
 });
 
 

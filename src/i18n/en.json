@@ -89,6 +89,7 @@
   "model_sub_unset": "{0} No separate model {1} — {2}.\n\nSet: `/model {3} <id>`",
   "model_text": "🧠 Text: `{0}`",
   "model_text_default": "🧠 Text (default): `{0}`",
+  "model_reset_all": "🔄 All models reset to defaults (main, vision, summary).",
   "model_photo": "👁 Photo: `{0}`",
   "model_summary_line": "📝 Summary: `{0}`",
   "model_spent": "🤖 This chat spent: ${0} ({1} req.)",

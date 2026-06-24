@@ -341,13 +341,24 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
   },
 
   // /model — show the models (text/photo/summary) + price + balance.
-  // /model <id> — change the main one. /model reset — reset the main one.
+  // /model <id> — change the main one. /model reset — reset ALL models (main + vision + summary).
   // /model vision <id> — model for photos.
   // /model summary <id> — model for /summary.
-  // (vision/summary reset — reset the corresponding one).
+  // (/model vision reset / /model summary reset — reset just that one).
   model: async (ctx, mode) => {
     const lang = ctx.cfg.lang;
     const arg = mode.argText.trim();
+
+    // /model reset (or a localized reset word) — reset ALL models at once: main + vision + summary.
+    // (`/model vision reset` / `… summary reset` still reset just one — they're caught below.)
+    if (["reset", ...tList(lang, "cfg_reset_words")].includes(arg.toLowerCase())) {
+      const newConf = { ...ctx.chatData.config };
+      delete newConf.model;
+      delete newConf.vision_model;
+      delete newConf.summary_model;
+      saveChatConfig(ctx, newConf);
+      return t(lang, "model_reset_all");
+    }
 
     // The vision/summary subcommands — a separate model for photos / for /summary. They differ only
     // in the word and the config key; the labels (scope/notSet) are taken from the locale by word.
