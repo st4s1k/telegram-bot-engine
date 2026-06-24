@@ -61,21 +61,27 @@ through the registry `src/persona/registry.ts` (`setPersona`/`getPersona` + gett
 
 | Part | What it provides |
 |---|---|
-| `wakeWords` | words that wake the bot in groups (substring, any case) — the pack's only non-localized text |
+| `wakeWords` | words that wake the bot in groups (substring, any case) — part of the pack's non-localized identity |
 | `usernameAliases` | `username (lowercase, no @) → display name` overrides |
 | `commands` | extra commands (`{type, defaultCmd, handler, llm?, skipHistory?, state?}`) |
-| `quickReplies` | trigger replies (substring / token table, gated by `cfgFlag`×`probKey`) |
+| `quickReplies` | trigger replies (substring / token table, gated by `cfgFlag`×`probKey`); `responses`/`tokenTable` values are **i18n keys** resolved per `cfg.lang` (see below) |
 | `randomThrows` | random "throws" (weighted pick) |
 | `config` | own schema keys, groups, presets, defaults (`defaults(env)`) |
 | `buildPromptLines` / `infoLines` / `adminFlags` | optional hooks: extra system-prompt / `/info` / `/admin` lines derived from the pack's own state |
 
-All fields are **optional** (the neutral pack is `{}`). The pack's **localized** strings — the former
-`PersonaTexts` (default voice, language line, fallback strings, `/help` text, `/info` title) plus its
-`/config` descriptions / group titles / preset descriptions — live in the **pack's own
-`i18n/<lang>.json` folder** (discovered and merged into the engine i18n by the same generate step; see
-[Localization](#localization)), not on the pack object. The `PersonaTexts` fields are stored under
-`persona_*` keys (`persona_defaultVoice`, `persona_helpText`, `persona_infoTitle`, …);
-`getPersonaTexts(lang)` rebuilds them per call via `t()` with neutral defaults.
+All fields are **optional** (the neutral pack is `{}`). **Every localized string a pack produces** lives
+in the **pack's own `i18n/<lang>.json` folder** (discovered and merged into the engine i18n by the same
+generate step; see [Localization](#localization)), not on the pack object: displayed command/status
+output, prompt-builder instruction lines, prompt seeds / synthetic user-turns, the injected flavor/state
+lines, **and** the quick-reply responses. The former `PersonaTexts` (default voice, language line,
+fallback strings, `/help` text, `/info` title) plus the `/config` descriptions / group titles / preset
+descriptions are stored under `persona_*` and config keys; `getPersonaTexts(lang)` rebuilds the
+`PersonaTexts` per call via `t()` with neutral defaults. The **only** things that stay inline in a pack
+are (a) the non-localized identity (`wakeWords` / `usernameAliases`) and (b) input-matching triggers —
+the quick-reply test regexes and the `tokenTable` **keys** — which match incoming messages rather than
+being output. Accordingly a `QuickReplyRule`'s `responses` is an i18n **key** whose value is the candidate
+array, and `tokenTable` maps an input token → an i18n key; `tryQuickReply` resolves them per `cfg.lang`
+via `tList` → `pickOne`.
 
 A command may declare a `state` slice — a piece of the generic per-chat **`personaState`** JSON slot
 whose schema the persona defines. The engine merges the defaults from all commands' `state` slices and
@@ -119,6 +125,11 @@ returns a single string or `undefined` (with lang→default fallback).
   code is **rejected** (the language stays unchanged), not silently accepted.
 - **Persona texts** are localized in the **pack's own `i18n/<lang>.json` folder** (merged into the engine
   i18n by the generate step), so the personality is multilingual independently of the engine UI language.
+- **Neutral / personaless fallbacks** are engine i18n keys (`neutral_fallback_error`,
+  `neutral_fallback_no_credits`, `neutral_target_name`, `neutral_info_title`), so a no-pack deployment
+  still localizes per `cfg.lang`. Other engine-only strings follow suit: `/config` booleans render via
+  `cfg_on`/`cfg_off`, the `reportError` admin alert via `err_admin_alert`, and `getUserName` falls back to
+  `name_user_fallback`.
 
 **Locales are discovered from the folders — the code hardcodes no language list.**
 `scripts/select-persona.mjs` scans `src/i18n/*.json` (engine) and the staged pack's
@@ -129,9 +140,12 @@ tables merged per locale). **Adding a language = drop a `src/i18n/<code>.json` f
 immediately usable via `/lang <code>` or `/config lang <code>` with no code change and no manual
 registration.
 
-> A pack's **displayed** command/status output is localized via `t()` from its `i18n/<lang>.json`;
-> its **model-input** strings (prompt-builder instructions, prompt seeds, flavor arrays injected into the
-> system prompt) stay inline in the pack code, since they shape the reply rather than being shown.
+> **Every** localized string a pack produces — displayed command/status output **and** its model-input
+> strings (prompt-builder instructions, prompt seeds, flavor arrays injected into the system prompt) **and**
+> its quick-reply responses — is localized via `t()`/`tList()` from its `i18n/<lang>.json`. Only the
+> non-localized identity (`wakeWords`/`usernameAliases`) and the input-matching triggers (quick-reply test
+> regexes, `tokenTable` keys) stay inline in the pack code, since they match incoming messages rather than
+> being output.
 
 ## When the bot replies on its own
 
