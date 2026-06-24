@@ -3,6 +3,7 @@
 // fallback to plain, the "typing" indicator, splitting long messages, writing to history.
 
 import { TELEGRAM_MSG_LIMIT, GETFILE_TIMEOUT_MS } from "./constants";
+import { t, DEFAULT_LANG } from "./i18n";
 import { isFallbackMessage, buildAssistantItem } from "./utils";
 import { appendHistory } from "./storage";
 import type { Ctx, Env, TgSendResult } from "./types";
@@ -224,7 +225,7 @@ export async function reportError(env: Env, where: string, err: any, opts: { cri
     const key = "errnotify:" + where;
     if (env.KV && await env.KV.get(key)) return;     // already alerted recently — stay silent
     if (env.KV) await env.KV.put(key, "1", { expirationTtl: 600 });
-    const text = `⚠️ ${env.BOT_NAME || "Bot"}: failure in \`${where}\`\n${msg}`;
+    const text = t(env.BOT_LANG || DEFAULT_LANG, "err_admin_alert", env.BOT_NAME || "Bot", where, msg);
     await Promise.all(adminChats.map(id => sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, id, text, undefined)));
   } catch (e: any) {
     console.error("reportError: notify failed", { err: e?.message || e });

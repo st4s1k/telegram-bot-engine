@@ -247,5 +247,14 @@
     "`/stop` · `/resume` — pause / unpause"
   ],
 
+  "neutral_fallback_error": "error, try again later",
+  "neutral_fallback_no_credits": "out of credits",
+  "neutral_target_name": "friend",
+  "neutral_info_title": "ℹ️ **Status**",
+  "name_user_fallback": "User",
+  "err_admin_alert": "⚠️ {0}: failure in `{1}`\n{2}",
+  "cfg_on": "ON",
+  "cfg_off": "OFF",
+
   "vision_hd_default": ["zoom"]
 }

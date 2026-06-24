@@ -195,7 +195,7 @@ export function mergeConfig(globalCfg: BotConfig, chatOverrides: ChatConfig | nu
   return result;
 }
 
-export function parseConfigValue(meta: ConfigMeta, rawVal: string, lang: string = "ru"): ConfigParseResult {
+export function parseConfigValue(meta: ConfigMeta, rawVal: string, lang: string = DEFAULT_LANG): ConfigParseResult {
   if (meta.type === "bool") {
     const v = (rawVal || "").toLowerCase();
     if (["on", "true", "1", "yes"].includes(v) || tList(lang, "cfg_true_words").includes(v)) return { ok: true, value: true };
@@ -317,7 +317,7 @@ export function buildConfigHelp(cfg: BotConfig, chatConf: ChatConfig): string {
       let icon = "🔹";
 
       if (meta.type === "bool") {
-        displayVal = val ? "ON" : "OFF";
+        displayVal = t(lang, val ? "cfg_on" : "cfg_off");
         icon = val ? "✅" : "❌";
       } else if (meta.type === "float") {
         displayVal = `${(val * 100).toFixed(0)}%`;

@@ -177,8 +177,8 @@ export function getReplyText(msg: TgMessage): string | null {
   return msg.reply_to_message?.text || null;
 }
 
-export function getUserName(msg: TgMessage): string {
-  return resolveUserName(msg.from) || "User";
+export function getUserName(msg: TgMessage, lang: string = DEFAULT_LANG): string {
+  return resolveUserName(msg.from) || t(lang, "name_user_fallback");
 }
 
 // Human-readable chat name for /admin: the group title (chat.title) or the

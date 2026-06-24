@@ -159,7 +159,7 @@ describe("parseConfigValue", () => {
 
   test("bool: on/off/вкл/выкл/1/0 + error", () => {
     assert.deepEqual(parseConfigValue(bool, "on"), { ok: true, value: true });
-    assert.deepEqual(parseConfigValue(bool, "ВЫКЛ"), { ok: true, value: false });
+    assert.deepEqual(parseConfigValue(bool, "ВЫКЛ", "ru"), { ok: true, value: false });
     assert.deepEqual(parseConfigValue(bool, "1"), { ok: true, value: true });
     assert.deepEqual(parseConfigValue(bool, "0"), { ok: true, value: false });
     assert.equal(parseConfigValue(bool, "maybe").ok, false);
@@ -189,7 +189,7 @@ describe("parseConfigValue", () => {
 
   test("string: reset/off/- → empty; spaces and length — error", () => {
     assert.deepEqual(parseConfigValue(str, "reset"), { ok: true, value: "" });
-    assert.deepEqual(parseConfigValue(str, "сброс"), { ok: true, value: "" });
+    assert.deepEqual(parseConfigValue(str, "сброс", "ru"), { ok: true, value: "" });
     assert.deepEqual(parseConfigValue(str, "a/b"), { ok: true, value: "a/b" });
     assert.equal(parseConfigValue(str, "a b").ok, false);          // space
     assert.equal(parseConfigValue(str, "x".repeat(200)).ok, false); // length

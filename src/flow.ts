@@ -12,6 +12,7 @@ import { sendAndStore, sendTyping, reportError } from "./telegram";
 import { runLLMWithHistory } from "./llm";
 import { buildReplyPrompt, buildDefaultPrompt } from "./prompts";
 import { isCommand, tryCommand, TECH_COMMANDS } from "./commands";
+import { tList } from "./i18n";
 import { runIncrementalSummary } from "./summary";
 import { runMemoryCuration } from "./curation";
 import { getPersonaQuickReplies, getPersonaThrows } from "./persona/registry";
@@ -96,13 +97,13 @@ export async function tryQuickReply(ctx: Ctx): Promise<boolean> {
     if (!ctx.cfg[r.cfgFlag]) continue;
     if (r.test) {
       if (r.test(ctx.textLower) && (!r.probKey || Math.random() < Number(ctx.cfg[r.probKey]))) {
-        await sendAndStore(ctx, pickOne(r.responses || []));
+        await sendAndStore(ctx, pickOne(r.responses ? tList(ctx.cfg.lang, r.responses) : []));
         return true;
       }
     } else if (r.tokenTable) {
-      const opts = r.tokenTable[lastToken(ctx.textRaw)];
-      if (opts) {
-        await sendAndStore(ctx, pickOne(opts));
+      const key = r.tokenTable[lastToken(ctx.textRaw)];
+      if (key) {
+        await sendAndStore(ctx, pickOne(tList(ctx.cfg.lang, key)));
         return true;
       }
     }

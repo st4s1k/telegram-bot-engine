@@ -257,5 +257,15 @@
   "mem_sub_dedupe": ["повторы"],
   "mem_refusal_starts": ["нет", "ничего", "нечего"],
   "mem_refusal_contains": ["фактов нет", "нет фактов"],
+
+  "neutral_fallback_error": "ошибка, попробуйте позже",
+  "neutral_fallback_no_credits": "закончились средства",
+  "neutral_target_name": "друг",
+  "neutral_info_title": "ℹ️ **Статус**",
+  "name_user_fallback": "Пользователь",
+  "err_admin_alert": "⚠️ {0}: сбой в `{1}`\n{2}",
+  "cfg_on": "ВКЛ",
+  "cfg_off": "ВЫКЛ",
+
   "vision_hd_default": ["присмотрись"]
 }

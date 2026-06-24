@@ -53,10 +53,10 @@ describe("personaless (neutral pack)", () => {
   });
 
   test.skipIf(!NEUTRAL_BUILD)("buildInfoStatus: neutral title, no arousal line", () => {
-    const env = makeEnv();
+    const env = makeEnv({ BOT_LANG: "en" }); // neutral texts are now localized → pin to en (the neutral base)
     const ctx = makeCtxFor(makeMsg({ chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), personaState: { arousal: 4 } });
     const out = buildInfoStatus(ctx);
-    assert.ok(out.includes("Status"));        // neutral infoTitle (NEUTRAL_TEXTS, English)
+    assert.ok(out.includes("Status"));        // neutral infoTitle (neutral_info_title, en)
     assert.ok(!out.includes("Возбуждение")); // neutral has no infoLines hook → no arousal line (even arousal>0)
   });
 

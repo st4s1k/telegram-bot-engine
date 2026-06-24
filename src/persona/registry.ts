@@ -6,7 +6,7 @@
 // can be moved into a private repo). The contract grows over the course of Phase 1 (texts → prompts → commands …).
 
 import type { Ctx, CommandMode, ChatConfig, ConfigMeta, Env } from "../types";
-import { tRaw, LOCALES } from "../i18n";
+import { t, tRaw, LOCALES } from "../i18n";
 
 // The persona's contribution to config: its own schema keys (switches/probabilities), presets, and defaults for those keys.
 // The engine merges them: CONFIG_SCHEMA/CONFIG_PRESETS/CONFIG_GROUPS = engine-base ∪ persona;
@@ -35,14 +35,17 @@ export interface RegisteredCommand {
 }
 
 // A quick reply without the LLM (persona content). The engine (tryQuickReply) iterates over them in order:
-// gating on cfg[cfgFlag]; either test mode (substring/regex + optional probKey + responses→pickOne) OR
-// tokenTable (by the message's last token). Order in the array = order of checking.
+// gating on cfg[cfgFlag]; either test mode (substring/regex + optional probKey) OR tokenTable (by the
+// message's last token). The displayed responses are i18n KEYS (their value is the candidate array),
+// resolved per cfg.lang via tList → pickOne at call time. Order in the array = order of checking.
 export interface QuickReplyRule {
   cfgFlag: string;
   probKey?: string;
   test?: (textLower: string) => boolean;
-  responses?: string[];
-  tokenTable?: Record<string, string[]>;
+  /** i18n key whose value is the array of candidate responses (resolved via tList(cfg.lang) → pickOne) */
+  responses?: string;
+  /** map: input token (lowercased) → i18n key whose value is that token's candidate responses */
+  tokenTable?: Record<string, string>;
 }
 
 // A random persona "throw" (a content reply instead of the usual one). The engine weights
@@ -104,13 +107,15 @@ export interface PersonaPack {
   adminFlags?: (state: Record<string, unknown>) => string;
 }
 
-// Neutral text defaults — used when no pack supplies a localized value (no persona, or a missing key).
-// The localized PersonaTexts fields live in each pack's i18n/<lang>.json under `persona_<field>` keys.
-const NEUTRAL_TEXTS = {
-  defaultVoice: "", languageLine: "",
-  fallbackError: "error, try again later", fallbackNoCredits: "out of credits",
-  targetNameFallback: "friend", helpText: "", infoTitle: "ℹ️ **Status**",
-} as const;
+// Neutral fallbacks — used when no pack supplies a localized value (no persona, or a missing persona_*
+// key). These are the engine's OWN i18n keys, so the neutral/personaless build localizes per cfg.lang:
+// field → engine i18n key. defaultVoice/languageLine/helpText have NO key (neutral = empty: no voice/help).
+const NEUTRAL_KEYS: Record<string, string> = {
+  fallbackError: "neutral_fallback_error",
+  fallbackNoCredits: "neutral_fallback_no_credits",
+  targetNameFallback: "neutral_target_name",
+  infoTitle: "neutral_info_title",
+};
 
 // A neutral default pack — so the engine builds/runs WITHOUT a persona (personaless).
 const NEUTRAL: PersonaPack = {};
@@ -124,7 +129,13 @@ export function getPersona(): PersonaPack { return active; }
 // keys, with tRaw's lang→DEFAULT_LANG fallback), falling back to the neutral defaults; the non-localized
 // identity (wakeWords/usernameAliases) comes from the active pack object.
 export function getPersonaTexts(lang: string): PersonaTexts {
-  const g = (f: keyof typeof NEUTRAL_TEXTS): string => tRaw(lang, "persona_" + f) ?? NEUTRAL_TEXTS[f];
+  // persona's own value (persona_<field>) → the engine's localized neutral fallback (neutral_* via t())
+  // → "" (a field with no neutral key is empty by design: neutral = no voice/help).
+  const g = (f: string): string => {
+    const fromPack = tRaw(lang, "persona_" + f);
+    if (fromPack !== undefined) return fromPack;
+    return NEUTRAL_KEYS[f] ? t(lang, NEUTRAL_KEYS[f]) : "";
+  };
   return {
     defaultVoice: g("defaultVoice"),
     languageLine: g("languageLine"),
@@ -141,10 +152,14 @@ export function getPersonaTexts(lang: string): PersonaTexts {
 // All fallback strings across all discovered locales — so isFallbackMessage keeps them out of history
 // regardless of the reply language.
 export function getAllFallbackTexts(): string[] {
-  const out: string[] = [NEUTRAL_TEXTS.fallbackError, NEUTRAL_TEXTS.fallbackNoCredits];
+  // Across every discovered locale: the pack's fallbacks (persona_*) AND the engine's neutral fallbacks
+  // (neutral_*), so isFallbackMessage keeps them out of history regardless of the reply language.
+  const out: string[] = [];
   for (const lang of LOCALES) {
-    const e = tRaw(lang, "persona_fallbackError"); if (e) out.push(e);
-    const n = tRaw(lang, "persona_fallbackNoCredits"); if (n) out.push(n);
+    for (const key of ["persona_fallbackError", "persona_fallbackNoCredits", "neutral_fallback_error", "neutral_fallback_no_credits"]) {
+      const v = tRaw(lang, key);
+      if (v) out.push(v);
+    }
   }
   return out;
 }
