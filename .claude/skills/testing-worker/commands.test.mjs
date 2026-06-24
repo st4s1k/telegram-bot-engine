@@ -168,6 +168,15 @@ describe("COMMANDS.model", () => {
     assert.equal(ctx.chatData.config.summary_model, undefined);
     assert.equal(ctx.chatData.config.random, false); // other settings kept
   });
+  test("/alias: set / list / del stores a per-chat alias in config", async () => {
+    const ctx = makeCtxFor(makeMsg(), makeEnv());
+    const set = await COMMANDS.alias(ctx, { argText: "@DesignMain Глеб" });
+    assert.match(set, /Глеб/);
+    assert.equal(ctx.chatData.config.aliases.designmain, "Глеб"); // username lowercased, @ stripped
+    assert.match(await COMMANDS.alias(ctx, { argText: "" }), /@designmain/); // list
+    await COMMANDS.alias(ctx, { argText: "del @DesignMain" });
+    assert.equal(ctx.chatData.config.aliases.designmain, undefined); // removed
+  });
 });
 
 

@@ -6,7 +6,7 @@ import { PHOTO_DELIM, GETFILE_TIMEOUT_MS } from "./constants";
 import { getPersonaTexts } from "./persona/registry";
 import { t } from "./i18n";
 import {
-  photoCacheKey, visualLabel, visualNote, buildUserItem, messageMentionsBot, shouldAnswer,
+  photoCacheKey, visualLabel, visualNote, buildUserItem, messageMentionsBot, shouldAnswer, chatAliases,
 } from "./utils";
 import { appendHistory, cachePhotoDesc } from "./storage";
 import { callOpenRouter, runLLMWithHistory } from "./llm";
@@ -22,7 +22,7 @@ export async function logIgnoredPhoto(ctx: Ctx, caption: string): Promise<void> 
   if (ctx.photoFromReply) return;
   const key = photoCacheKey(ctx.photo);
   const cachedDesc = (key && ctx.chatData.photoCache?.[key]) || "";
-  await appendHistory(ctx, [buildUserItem(ctx.msg, visualNote(visualLabel(ctx), caption, cachedDesc))]);
+  await appendHistory(ctx, [buildUserItem(ctx.msg, visualNote(visualLabel(ctx), caption, cachedDesc), chatAliases(ctx))]);
 }
 
 // Parse the vision model's reply per the "<description> ||| <reply>" contract. Without the delimiter the whole text
@@ -126,7 +126,7 @@ export async function handlePhotoMessage(ctx: Ctx): Promise<void> {
   } else {
     note = visualNote(label, caption, desc);
   }
-  await appendHistory(ctx, [buildUserItem(ctx.msg, note)]);
+  await appendHistory(ctx, [buildUserItem(ctx.msg, note, chatAliases(ctx))]);
 
   // Reply to the chat (sendAndStore itself adds the bot's reply to history).
   await sendAndStore(ctx, reply || getPersonaTexts(ctx.cfg.lang).fallbackError);

@@ -141,9 +141,13 @@ export interface LLMMessage {
   content: string | LLMContentPart[];
 }
 
-// Per-chat setting overrides (keys from CONFIG_SCHEMA). Accessed dynamically by key.
+// Per-chat setting overrides (scalar keys from CONFIG_SCHEMA), accessed dynamically by key. Plus the
+// reserved `aliases` key — a per-chat username(lowercase)→display-name map set by /alias. It is NOT a
+// /config scalar: mergeConfig copies only CONFIG_SCHEMA keys, so `aliases` never leaks into the effective
+// BotConfig; the name resolvers read it straight off chatData.config (see chatAliases() in utils.ts).
 export interface ChatConfig {
-  [key: string]: string | number | boolean | undefined;
+  [key: string]: string | number | boolean | Record<string, string> | undefined;
+  aliases?: Record<string, string>;
 }
 
 // Per-chat PERSONA state — a generic JSON slot whose schema is defined by the pack itself (PersonaPack.stateSchema).

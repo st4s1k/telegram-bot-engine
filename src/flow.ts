@@ -4,7 +4,7 @@
 
 import {
   makeCtx, shouldAnswer, parseCommandAndArg, chatTitleFromMsg, buildUserItem, visualLabel,
-  lastToken, pickOne, getReplyText, tzParts,
+  lastToken, pickOne, getReplyText, tzParts, chatAliases,
 } from "./utils";
 import { getChatData, flushChatData, updateHistoryMessage, appendHistory, parseJson } from "./storage";
 import { getGlobalConfig, mergeConfig } from "./config";
@@ -64,7 +64,7 @@ export async function handleTelegramMessage(msg: TgMessage, env: Env, isEdit: bo
     const ownVisual = ctx.hasVisual && !ctx.photoFromReply;
     const logged = ownVisual ? `[${visualLabel(ctx)}] ${ctx.textRaw}`.trim() : ctx.textRaw;
     if (!TECH_COMMANDS.has(mode.type)) {
-      await appendHistory(ctx, [buildUserItem(msg, logged)]);
+      await appendHistory(ctx, [buildUserItem(msg, logged, chatAliases(ctx))]);
     }
 
     // If paused — react only to commands

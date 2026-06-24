@@ -240,6 +240,13 @@
   "lang_set": "✅ Language set: {0}",
   "lang_unknown": "⚠️ Unknown language `{0}`. Available: {1}",
 
+  "alias_set": "🔖 Alias set: @{0} → {1}",
+  "alias_del_ok": "🗑 Alias removed: @{0} (was {1})",
+  "alias_del_oor": "⚠️ No alias for @{0}.",
+  "alias_empty": "No aliases set. Add one: `/alias @username Name`",
+  "alias_list_header": "🔖 *Name aliases* (this chat)",
+  "alias_usage": "Usage: `/alias @username Name` · `/alias` (list) · `/alias del @username`",
+
   "help_engine": [
     "🤖 **Commands**",
     "",
@@ -252,6 +259,7 @@
     "`/memory` `add` · `list` · `del N` · `forget` · `dedupe` · `size_chars N` — long-term memory",
     "`/summary` — incremental \"what's new\" digest",
     "`/rp` `<role>` · `off` — set / clear the chat role",
+    "`/alias` `@user Name` · `del @user` — per-chat display-name aliases",
     "`/stop` · `/resume` — pause / unpause"
   ],
 

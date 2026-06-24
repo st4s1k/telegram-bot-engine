@@ -501,6 +501,40 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
     saveChatConfig(ctx, { ...ctx.chatData.config, lang: arg });
     return t(arg, "lang_set", arg);
   },
+
+  // /alias @user Name — set a per-chat display-name alias (username → name). /alias — list them.
+  // /alias del @user — remove one. Stored in chats.config.aliases; the name resolvers merge it OVER the
+  // pack-static usernameAliases, so it also fixes the [from:Name] history tag the model sees.
+  alias: async (ctx, mode) => {
+    const lang = ctx.cfg.lang;
+    const raw = (mode.argText || "").trim();
+    const cur: Record<string, string> = { ...(ctx.chatData.config.aliases ?? {}) };
+    const norm = (u: string): string => u.replace(/^@+/, "").toLowerCase();
+    const save = (): void => { saveChatConfig(ctx, { ...ctx.chatData.config, aliases: cur }); };
+
+    if (!raw) {
+      const entries = Object.entries(cur);
+      if (!entries.length) return t(lang, "alias_empty");
+      return [t(lang, "alias_list_header"), ...entries.map(([u, n]) => `@${u} → ${n}`)].join("\n");
+    }
+    const parts = raw.split(/\s+/);
+    if (["del", "delete", "remove"].includes(parts[0].toLowerCase())) {
+      const u = norm(parts[1] || "");
+      if (!u) return t(lang, "alias_usage");
+      if (!cur[u]) return t(lang, "alias_del_oor", u);
+      const name = cur[u];
+      delete cur[u];
+      save();
+      return t(lang, "alias_del_ok", u, name);
+    }
+    // set: first token = @username, the rest = the display name.
+    const u = norm(parts[0]);
+    const name = raw.slice(parts[0].length).trim();
+    if (!u || !name) return t(lang, "alias_usage");
+    cur[u] = name;
+    save();
+    return t(lang, "alias_set", u, name);
+  },
 };
 
 // The engine's core commands — self-describing plugins (the SAME RegisteredCommand contract as the persona):
@@ -519,6 +553,7 @@ const ENGINE_COMMAND_PLUGINS: RegisteredCommand[] = [
   { type: "stop",    defaultCmd: "/stop",    skipHistory: true, handler: ENGINE_COMMANDS.stop },
   { type: "resume",  defaultCmd: "/resume",  skipHistory: true, handler: ENGINE_COMMANDS.resume },
   { type: "lang",    defaultCmd: "/lang",    skipHistory: true, handler: ENGINE_COMMANDS.lang },
+  { type: "alias",   defaultCmd: "/alias",   skipHistory: true, handler: ENGINE_COMMANDS.alias },
 ];
 // Register the core in the registry — now the engine and the pack are a single plugin list (getAllCommands).
 setEngineCommands(ENGINE_COMMAND_PLUGINS);

@@ -152,19 +152,20 @@ export function messageMentionsBot(text: string, _msg: TgMessage, cfg: BotConfig
 // The private username→name mapping is persona identity (non-localized), on the pack object:
 // read per call via getPersona().usernameAliases.
 
-export function resolveUserName(user: TgUser | null | undefined): string | null {
+export function resolveUserName(user: TgUser | null | undefined, chatAliases: Record<string, string> = {}): string | null {
   if (!user) return null;
   const uname = user.username && user.username.toLowerCase();
-  const aliases = getPersona().usernameAliases ?? {};
+  // pack-static aliases (getPersona().usernameAliases) ∪ per-chat /alias overrides (the latter win).
+  const aliases = { ...(getPersona().usernameAliases ?? {}), ...chatAliases };
   if (uname && aliases[uname]) return aliases[uname];
   return user.first_name || null;
 }
 
 // targetNameFallback is localized (a PersonaTexts field) — pass the chat's lang so the placeholder name
 // matches the UI language; defaults to DEFAULT_LANG when a caller has no lang in hand.
-export function pickTargetName(msg: TgMessage, lang: string = DEFAULT_LANG): string {
-  return resolveUserName(msg.reply_to_message?.from)
-      || resolveUserName(msg.from)
+export function pickTargetName(msg: TgMessage, lang: string = DEFAULT_LANG, chatAliases: Record<string, string> = {}): string {
+  return resolveUserName(msg.reply_to_message?.from, chatAliases)
+      || resolveUserName(msg.from, chatAliases)
       || getPersonaTexts(lang).targetNameFallback;
 }
 
@@ -177,8 +178,14 @@ export function getReplyText(msg: TgMessage): string | null {
   return msg.reply_to_message?.text || null;
 }
 
-export function getUserName(msg: TgMessage, lang: string = DEFAULT_LANG): string {
-  return resolveUserName(msg.from) || t(lang, "name_user_fallback");
+export function getUserName(msg: TgMessage, lang: string = DEFAULT_LANG, chatAliases: Record<string, string> = {}): string {
+  return resolveUserName(msg.from, chatAliases) || t(lang, "name_user_fallback");
+}
+
+// Per-chat display-name aliases (username→name), set via /alias and stored in the chat config. The name
+// resolvers merge these over the pack-static usernameAliases. Call sites with a ctx pass chatAliases(ctx).
+export function chatAliases(ctx: Ctx): Record<string, string> {
+  return ctx.chatData.config.aliases ?? {};
 }
 
 // Human-readable chat name for /admin: the group title (chat.title) or the
@@ -232,14 +239,14 @@ export function tzParts(unixMs: number, tz: string = "UTC"): { hour: number; day
 
 // --- History: metadata and items ---
 
-export function getUserMeta(msg: TgMessage): HistoryMeta {
+export function getUserMeta(msg: TgMessage, chatAliases: Record<string, string> = {}): HistoryMeta {
   const f = msg.from || {};
   const meta: HistoryMeta = {
     message_id: msg.message_id,
     reply_message_id: msg.reply_to_message?.message_id,
     user_id: f.id,
     username: f.username,
-    name: f.first_name,
+    name: resolveUserName(msg.from, chatAliases) ?? f.first_name,
   };
   // For a photo we remember the group (album) and the stable frame key — so that we can later
   // link frames of the same album by media_group_id.
@@ -249,8 +256,8 @@ export function getUserMeta(msg: TgMessage): HistoryMeta {
   return meta;
 }
 
-export function buildUserItem(msg: TgMessage, content: string): HistoryItem {
-  return { role: "user", content, meta: getUserMeta(msg) };
+export function buildUserItem(msg: TgMessage, content: string, chatAliases: Record<string, string> = {}): HistoryItem {
+  return { role: "user", content, meta: getUserMeta(msg, chatAliases) };
 }
 
 export function buildAssistantItem(content: string, cfg: BotConfig, replyId: number | undefined, sent: TgSendResult | null | undefined): HistoryItem {
