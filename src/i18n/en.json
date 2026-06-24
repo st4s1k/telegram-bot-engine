@@ -48,6 +48,13 @@
 
   "mem_hint_notes": "\n\nℹ️ Memory works as notes. Auto-recall of facts in replies is off — enable: `/config rag on`",
   "mem_forgotten": "🧠💨 Memory wiped: history, facts, images, role and mood forgotten. Settings kept.",
+  "mem_forget_history": "🧠💨 Chat history wiped (facts, role and settings kept).",
+  "mem_forget_memory": "🧠💨 Long-term facts wiped.",
+  "mem_forget_role": "🎭 Role reset.",
+  "mem_forget_state": "🧠💨 Persona state reset.",
+  "mem_forget_cache": "🧠💨 Cached image descriptions wiped.",
+  "mem_forget_spend": "🧠💨 Spend counter reset.",
+  "mem_forget_usage": ["🧠 *Forget — what exactly?*", "`/memory forget all` — everything (history, facts, role, state, images, spend)", "`/memory forget history` — chat history (+ summaries)", "`/memory forget memory` — long-term facts", "`/memory forget role` — the chat role", "`/memory forget state` — persona state (mood, etc.)", "`/memory forget cache` — cached image descriptions", "`/memory forget spend` — the spend counter", "_Settings are always kept._"],
   "mem_add_empty": "Remember what, exactly? Write: `/memory add <text>`",
   "mem_add_one": "🧠 Got it: {0}",
   "mem_add_dup_one": "🧠 I already remember that.",
@@ -69,7 +76,7 @@
     "`/memory add <text>` — remember a fact",
     "`/memory list` — show facts",
     "`/memory del <N>` — delete a fact by its list number",
-    "`/memory forget` — wipe everything (except settings)",
+    "`/memory forget <all|history|memory|role|…>` — wipe (bare → help)",
     "`/memory dedupe` — remove duplicates",
     "`/memory size_chars <N>` — memory size (chars)"
   ],

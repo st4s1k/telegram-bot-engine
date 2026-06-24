@@ -75,13 +75,26 @@ describe("COMMANDS.memory", () => {
   test("forget wipes history/cache/role/mood/spend, settings remain", async () => {
     const cd = { ...DEFAULT_CHAT_DATA(), history: [{ content: "x" }], photoCache: { k: "d" }, role: "зек", personaState: { arousal: 4 }, spend: 1, spendCount: 5, config: { random: false } };
     const ctx = makeCtxFor(makeMsg(), makeEnv(), cd);
-    await COMMANDS.memory(ctx, { argText: "forget" });
+    await COMMANDS.memory(ctx, { argText: "forget all" });
     assert.deepEqual(ctx.chatData.history, []);
     assert.deepEqual(ctx.chatData.photoCache, {});
     assert.equal(ctx.chatData.role, null);
     assert.deepEqual(ctx.chatData.personaState, getPersonaStateDefaults());
     assert.equal(ctx.chatData.spend, 0);
     assert.deepEqual(ctx.chatData.config, { random: false }); // settings intact
+  });
+  test("forget targets: bare → usage (no wipe); per-target wipes only its slice", async () => {
+    const cd = { ...DEFAULT_CHAT_DATA(), history: [{ content: "x" }], role: "зек" };
+    const ctx = makeCtxFor(makeMsg(), makeEnv(), cd);
+    const help = await COMMANDS.memory(ctx, { argText: "forget" });   // bare → usage, nothing wiped
+    assert.match(help, /forget all/);
+    assert.equal(ctx.chatData.history.length, 1);
+    assert.equal(ctx.chatData.role, "зек");
+    await COMMANDS.memory(ctx, { argText: "forget history" });        // history only
+    assert.deepEqual(ctx.chatData.history, []);
+    assert.equal(ctx.chatData.role, "зек");                           // role kept
+    await COMMANDS.memory(ctx, { argText: "forget role" });           // role only
+    assert.equal(ctx.chatData.role, null);
   });
   test("dedupe removes consecutive duplicates", async () => {
     const env = makeEnv();
@@ -219,7 +232,7 @@ describe("COMMANDS.summary", () => {
   test("/memory forget clears the summary and ALL boundaries", async () => {
     const cd = { ...DEFAULT_CHAT_DATA(), _summary: "s", _dailyUptoId: 10, _cmdUptoId: 8, _cmdDay: "2026-06-20" };
     const ctx = makeCtxFor(makeMsg(), makeEnv(), cd);
-    await COMMANDS.memory(ctx, { argText: "forget" });
+    await COMMANDS.memory(ctx, { argText: "forget all" });
     assert.equal(ctx.chatData._summary, "");
     assert.equal(ctx.chatData._dailyUptoId, 0);
     assert.equal(ctx.chatData._cmdUptoId, 0);
@@ -314,7 +327,7 @@ describe("audit: memory and model branches", () => {
     for (const alias of ["стереть", "clear"]) {
       const cd = { ...DEFAULT_CHAT_DATA(), history: [{ content: "x" }], role: "r" };
       const ctx = makeCtxFor(makeMsg(), makeEnv(), cd);
-      await COMMANDS.memory(ctx, { argText: alias });
+      await COMMANDS.memory(ctx, { argText: alias + " all" });
       assert.deepEqual(ctx.chatData.history, []);
     }
     const env = makeEnv();

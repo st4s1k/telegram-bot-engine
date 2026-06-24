@@ -221,10 +221,10 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
   },
 
   // /memory — manage the chat's memory.
-  //   /memory                  — show status (history/cache/size)
-  //   /memory forget           — wipe memory (history, cache, role, mood, spend)
-  //   /memory dedupe           — remove consecutive identical messages
-  //   /memory size_chars <N>   — set the history size in characters (the bot's memory)
+  //   /memory                       — show status (history/cache/size)
+  //   /memory forget [target]       — wipe a slice (all|history|memory|role|state|cache|spend); bare → usage help
+  //   /memory dedupe                — remove consecutive identical messages
+  //   /memory size_chars <N>        — set the history size in characters (the bot's memory)
   memory: async (ctx, mode) => {
     const lang = ctx.cfg.lang;
     const raw = mode.argText.trim();
@@ -233,20 +233,49 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
     // memory works like notes, but the bot does not recall facts in replies — hint about this neutrally.
     const ragHint = ctx.cfg.rag ? "" : t(lang, "mem_hint_notes");
 
-    if (sub === "forget" || sub === "clear" || tList(lang, "mem_sub_forget").includes(sub)) {
-      ctx.chatData.photoCache = {};
-      ctx.chatData.role = null;
-      ctx.chatData.personaState = getPersonaStateDefaults(); // reset the persona state to the schema defaults
-      ctx.chatData.spend = 0;
-      ctx.chatData.spendCount = 0;
-      ctx.chatData._summary = "";
-      ctx.chatData._dailyUptoId = 0; // reset the summary boundaries (the id autoincrement is not reused)
-      ctx.chatData._cmdUptoId = 0;
-      ctx.chatData._cmdDay = "";
-      ctx.chatData._memUptoId = 0;   // and the fact-curation boundary
-      await clearChatHistory(ctx); // history=[] + _dirty + DELETE rows from D1
-      await clearMemories(ctx);    // facts + their vectors mem:<chatId>
-      return t(lang, "mem_forgotten");
+    // /memory forget [target] — wipe a chosen slice (or `all`). Bare `forget` → usage help (no wipe),
+    // since the unqualified command used to nuke everything. The forget-word may be localized (mem_sub_forget).
+    const fParts = raw.split(/\s+/);
+    const fHead = (fParts[0] || "").toLowerCase();
+    if (fHead === "forget" || fHead === "clear" || tList(lang, "mem_sub_forget").includes(fHead)) {
+      const target = (fParts[1] || "").toLowerCase();
+      if (!target) return t(lang, "mem_forget_usage");
+      const all = target === "all";
+      // target → aliases. A target wipes its own slice; `all` wipes every slice.
+      const TARGETS: Record<string, string[]> = {
+        history: ["history"], memory: ["memory", "facts"], role: ["role"],
+        state: ["state", "mood"], cache: ["cache", "photos"], spend: ["spend"],
+      };
+      const known = all || Object.values(TARGETS).some(a => a.includes(target));
+      if (!known) return t(lang, "mem_forget_usage");
+      const hit = (k: string): boolean => all || TARGETS[k].includes(target);
+
+      if (hit("history")) {
+        ctx.chatData._summary = "";
+        ctx.chatData._dailyUptoId = 0; // reset the summary boundaries (the id autoincrement is not reused)
+        ctx.chatData._cmdUptoId = 0;
+        ctx.chatData._cmdDay = "";
+        ctx.chatData._memUptoId = 0;   // history gone → re-curate facts from scratch
+        await clearChatHistory(ctx);   // history=[] + _dirty + DELETE rows from D1
+      }
+      if (hit("memory")) {
+        ctx.chatData._memUptoId = 0;
+        await clearMemories(ctx);      // facts + their vectors mem:<chatId>
+      }
+      if (hit("role")) ctx.chatData.role = null;
+      if (hit("state")) ctx.chatData.personaState = getPersonaStateDefaults();
+      if (hit("cache")) ctx.chatData.photoCache = {};
+      if (hit("spend")) { ctx.chatData.spend = 0; ctx.chatData.spendCount = 0; }
+      ctx.chatData._dirty = true;      // persist the chats-row resets (clear* set it only for history/facts)
+
+      return t(lang,
+        all ? "mem_forgotten" :
+        target === "history" ? "mem_forget_history" :
+        (target === "memory" || target === "facts") ? "mem_forget_memory" :
+        target === "role" ? "mem_forget_role" :
+        (target === "state" || target === "mood") ? "mem_forget_state" :
+        (target === "cache" || target === "photos") ? "mem_forget_cache" :
+        "mem_forget_spend");
     }
 
     // /memory add <text> — memorize a fact manually (raw, to preserve the text's case).

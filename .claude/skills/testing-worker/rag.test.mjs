@@ -319,7 +319,7 @@ describe("Memory · /memory forget", () => {
     const idB = await addMemory(ctxB, "факт Б", "manual");
     ctxA.chatData._memUptoId = 5;
 
-    await COMMANDS.memory(ctxA, { argText: "forget" });
+    await COMMANDS.memory(ctxA, { argText: "forget all" });
 
     assert.equal((await dbMemories(env, 1)).length, 0);
     assert.ok(!env._vec.store.has(memVectorId(1, idA)));
