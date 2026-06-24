@@ -199,6 +199,7 @@ export async function callOpenRouter(
       const body = await res.text().catch(() => "");
       const elapsed = Date.now() - startTs;
       logLLM(cfg, tag + "_err", { rid, status: res.status, elapsed, body: body.slice(0, 500) });
+      llmStat({ rid, tag, model, elapsed, outcome: "http_" + res.status });
       if (res.status === 402) return fb.fallbackNoCredits;
       return fb.fallbackError;
     }
@@ -239,9 +240,11 @@ export async function callOpenRouter(
     const elapsed = Date.now() - startTs;
     if (!content || !content.trim()) {
       console.warn("LLM empty stream", { rid, tag, elapsed });
+      llmStat({ rid, tag, model, elapsed, outcome: "empty" });
       return fb.fallbackError;
     }
     logLLM(cfg, tag + "_ok", { rid, elapsed, len: content.length, cost });
+    llmStat({ rid, tag, model, elapsed, outcome: "ok", cost });
     if (ctx && Number.isFinite(cost) && cost > 0) addSpend(ctx, cost);
     return content;
   } catch (e: any) {
@@ -252,9 +255,11 @@ export async function callOpenRouter(
     if (ac.signal.aborted || e?.name === "AbortError" || e?.name === "TimeoutError") {
       const reason = ac.signal.reason === "idle" ? "idle" : "hard";
       console.warn("LLM timeout", { rid, tag, elapsed, model, reason });
+      llmStat({ rid, tag, model, elapsed, outcome: "timeout_" + reason });
       return fb.fallbackError;
     }
     console.error("LLM fetch error:", { rid, tag, elapsed, msg: e?.message || e });
+    llmStat({ rid, tag, model, elapsed, outcome: "error" });
     return fb.fallbackError;
   } finally {
     if (idleTimer) clearTimeout(idleTimer);
@@ -301,4 +306,11 @@ export function toLLMMessages(
 
 export function logLLM(cfg: BotConfig, phase: string, payload: Record<string, unknown>): void {
   if (cfg.llmLog) console.log(JSON.stringify({ ts: Date.now(), phase, ...payload }));
+}
+
+// Always-on one-line telemetry for the TERMINAL phase of an LLM call — independent of LLM_LOG (which is
+// off by default and floods every phase). Lets `wrangler tail`/logpush answer "how slow / how expensive /
+// how often failing" without enabling verbose logging. `console.log` so it doesn't trip warn/error checks.
+function llmStat(o: { rid: string; tag: string; model: string; elapsed: number; outcome: string; cost?: number }): void {
+  console.log(JSON.stringify({ llm: o.outcome, rid: o.rid, tag: o.tag, model: o.model, ms: o.elapsed, ...(typeof o.cost === "number" ? { cost: o.cost } : {}) }));
 }
