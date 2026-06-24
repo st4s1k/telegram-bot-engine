@@ -111,6 +111,14 @@ describe("sendAndStore", () => {
     await sendAndStore(ctx, FALLBACK_LLM_ERROR);
     assert.equal(ctx.chatData.history.length, 0);
   });
+
+  test("a failed send is NOT stored in history (no phantom turn)", async () => {
+    const ctx = makeCtxFor(makeMsg(), makeEnv());
+    FETCH.set("send", () => H.jsonResp({ ok: false, description: "bot was blocked by the user" }));
+    const res = await sendAndStore(ctx, "привет");
+    assert.ok(!res?.result?.message_id);          // both send attempts reported failure
+    assert.equal(ctx.chatData.history.length, 0); // a reply the user never got isn't recorded
+  });
 });
 
 describe("reportError", () => {

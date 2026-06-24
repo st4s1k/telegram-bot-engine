@@ -16,6 +16,13 @@ import type { Env, TgUpdate } from "./types";
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     if (request.method === "POST") {
+      // Origin check: if a webhook secret is configured, require Telegram's header to match. Otherwise a
+      // forged POST to the worker URL could impersonate ANY user (incl. an admin, since /admin trusts
+      // msg.from.username). Optional so an existing deployment isn't locked out until it sets the secret +
+      // re-runs setWebhook(secret_token=…); silent 200 on mismatch (no info leak, no retry storm).
+      if (env.TELEGRAM_WEBHOOK_SECRET && request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TELEGRAM_WEBHOOK_SECRET) {
+        return new Response("ok");
+      }
       const update = (await request.json().catch(() => null)) as TgUpdate | null;
       const isEdit = !!(update && update.edited_message);
       const msg = update && (update.message || update.edited_message);

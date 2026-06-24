@@ -26,6 +26,9 @@
     { "binding": "VECTORIZE", "index_name": "telegram-bot-engine-memory" }
   ],
   "triggers": {
-    "crons": ["0 5 * * *", "0 6 * * *"]
+    // The daily-summary cron gate is hour===8 in BOT_TZ (default UTC), so fire at 08:00 UTC here.
+    // For a non-UTC BOT_TZ, set the UTC cron(s) to hit 08:00 LOCAL — two entries cover DST (see the
+    // deployment pack's wrangler.jsonc, e.g. "0 5"/"0 6" for Europe/Chisinau).
+    "crons": ["0 8 * * *"]
   }
 }

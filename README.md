@@ -220,9 +220,15 @@ The engine is a **library — it does not deploy itself.** A push to `master` tr
 and runs `wrangler deploy` against its own resources/secrets.
 
 - **Worker secrets** (write-only, survive deploys): `TELEGRAM_BOT_TOKEN`, `OPENROUTER_API_KEY`,
-  `OPENROUTER_PROVISIONING_KEY` (optional — full balance via `/model`).
+  `OPENROUTER_PROVISIONING_KEY` (optional — full balance via `/model`), `TELEGRAM_WEBHOOK_SECRET`
+  (optional but recommended — webhook origin check, see below).
 - The deployment's `wrangler.jsonc` holds the real `vars` + the `KV`, D1 `DB`, `AI`, `VECTORIZE` bindings.
 - The Telegram webhook must point at the worker URL.
+- **Webhook origin check (recommended):** set the `TELEGRAM_WEBHOOK_SECRET` secret and register the webhook
+  with that token (`setWebhook` with `secret_token=…`). The worker then rejects any POST whose
+  `X-Telegram-Bot-Api-Secret-Token` header doesn't match. Without it, anyone who learns the worker URL can
+  forge Updates — and since `/admin` trusts `msg.from.username`, impersonate an admin. Unset → no check
+  (backward-compatible), so set the secret **and** re-register the webhook together.
 
 A manual `npx wrangler deploy` is an emergency fallback (apply migrations and stage the pack first).
 

@@ -13,6 +13,7 @@ export interface Env {
   AI: Ai;             // Workers AI — embeddings for long-term memory (RAG)
   VECTORIZE: Vectorize; // Vectorize index for semantic memory
   TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_WEBHOOK_SECRET?: string; // if set, the fetch handler requires Telegram's X-Telegram-Bot-Api-Secret-Token header to match
   OPENROUTER_API_KEY?: string;
   OPENROUTER_PROVISIONING_KEY?: string;
   OPENROUTER_HOST?: string;

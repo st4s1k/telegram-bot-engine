@@ -201,8 +201,10 @@ export async function sendAndStore(ctx: Ctx, content: string, { skipHistory = fa
     lastSent = await sendTelegramMessage(ctx.cfg.telegramToken, ctx.chatId, parts[i], i === 0 ? ctx.replyTargetId : undefined);
   }
   // We do NOT write to history: technical replies (status of /config, /info commands, etc.) and
-  // fallback errors — otherwise the model later "picks them up" as its own utterance.
-  if (!skipHistory && !isFallbackMessage(clean)) {
+  // fallback errors — otherwise the model later "picks them up" as its own utterance. Also skip when the
+  // send FAILED (lastSent has no result.message_id: both MarkdownV2 and plain attempts errored / non-ok) —
+  // recording a reply the user never received would leave a phantom turn the model then "remembers" saying.
+  if (!skipHistory && !isFallbackMessage(clean) && lastSent?.result?.message_id) {
     await appendHistory(ctx, [buildAssistantItem(clean, ctx.cfg, ctx.replyTargetId, lastSent)]);
   }
   return lastSent;
