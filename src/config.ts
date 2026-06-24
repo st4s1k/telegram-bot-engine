@@ -109,6 +109,9 @@ export function getGlobalConfig(env: Env): BotConfig {
     // (the engine hardcodes no personal username; the deployment sets ADMIN_USERNAMES in vars).
     adminUsernames: String(env.ADMIN_USERNAMES || "")
       .toLowerCase().split(",").map(s => s.trim()).filter(Boolean),
+    // Admin Telegram user ids (immutable account ids) — preferred over the mutable @username.
+    adminUserIds: String(env.ADMIN_USER_IDS || "")
+      .split(",").map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n !== 0),
     llmLog: bool(env.LLM_LOG),
     lang, // language of the engine's UI strings (ru/en), per-chat via /config lang
     // IANA timezone for history timestamps and the daily-summary cron gate. Default UTC. Deployment-wide
@@ -245,6 +248,11 @@ export function setConfigParam(ctx: Ctx, key: string, rawVal: string): string {
   // default in the repo, but changing to a non-existent language is an error, not a silent fallback.
   if (key === "lang" && parsed.value && !LOCALES.includes(String(parsed.value))) {
     return t(lang, "lang_unknown", parsed.value, LOCALES.join(", "));
+  }
+  // model / vision_model / summary_model flow into the OpenRouter URL path + request body — require an
+  // "author/slug"-ish shape so junk is rejected with a clean error instead of an odd outbound request.
+  if (["model", "vision_model", "summary_model"].includes(key) && parsed.value && !/^[\w.@:\/-]+$/.test(String(parsed.value))) {
+    return t(lang, "cfg_set_error", t(lang, "cfg_err_model"), key);
   }
 
   const newConf: ChatConfig = { ...ctx.chatData.config, [key]: parsed.value };

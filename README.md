@@ -239,8 +239,8 @@ models (`OPENROUTER_MODEL`/`OPENROUTER_VISION_MODEL`/`OPENROUTER_SUMMARY_MODEL`/
 `MAX_HISTORY_CHARS`, `MAX_TOKENS`, `ANSWER_PROB`, `ENABLE_VISION`, `ENABLE_REASONING`, `VISION_DETAIL`,
 `VISION_HD_WORDS`, `ENABLE_RAG`, `RAG_TOP_K`, `RAG_MIN_SCORE`, `BOT_NAME`/`BOT_USERNAME`,
 `BOT_LANG` (UI language, default `en`), `BOT_TZ` (IANA timezone for history timestamps and the
-daily-summary cron gate, default `UTC`), `ADMIN_USERNAMES`, `ADMIN_CHAT_IDS`, `LLM_LOG`. Persona env
-(switches/probabilities) is set by the pack.
+daily-summary cron gate, default `UTC`), `ADMIN_USERNAMES`, `ADMIN_USER_IDS`, `ADMIN_CHAT_IDS`, `LLM_LOG`.
+Persona env (switches/probabilities) is set by the pack.
 
 ### `/config` keys
 
@@ -265,8 +265,10 @@ timezone is deployment-wide (`BOT_TZ` env), not a per-chat key.
 ### Admins
 
 `ADMIN_USERNAMES` — a CSV list of Telegram usernames (without `@`) with access to the hidden `/admin`
-(inspect sessions, statistics, remote command execution). Case-insensitive. Unset → **no admins** (the
-engine hardcodes no personal username).
+(inspect sessions, statistics, remote command execution). Case-insensitive. **`ADMIN_USER_IDS`** — a CSV
+list of immutable Telegram **user ids** with the same access (preferred — a username can be renamed or
+re-registered by someone else). A user is an admin if they match *either* list. Both unset → **no admins**
+(the engine hardcodes no personal username/id).
 
 `/admin chat_cmd <id> <command>` runs **any** command in another chat (the reply goes to the admin).
 Control commands persist their effect in the target chat; **LLM commands are a preview**: they are not

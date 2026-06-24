@@ -30,6 +30,7 @@ export interface Env {
   BOT_NAME?: string;
   ADMIN_USERNAMES?: string; // CSV list of admin usernames (without @); empty — no admins
   ADMIN_CHAT_IDS?: string;  // CSV list of chat_id for failure alerts (reportError critical); empty — log only
+  ADMIN_USER_IDS?: string;  // CSV list of admin Telegram user ids (immutable account ids) — preferred over ADMIN_USERNAMES
   LLM_LOG?: string;
   ANSWER_PROB?: string;
   ENABLE_VISION?: string;
@@ -221,6 +222,7 @@ export interface BotConfig {
   botName: string;
   botId: number | null;
   adminUsernames: string[];
+  adminUserIds: number[];
   llmLog: boolean;
   lang: string; // language of the engine's UI strings (ru/en); the persona localizes its own texts separately
   timezone: string; // IANA timezone (env BOT_TZ, default UTC) for history timestamps + the daily-summary cron gate

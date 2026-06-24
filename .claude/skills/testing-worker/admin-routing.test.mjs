@@ -68,6 +68,14 @@ describe("COMMANDS.admin", () => {
       assert.match(await COMMANDS.admin(ctx, { argText: "" }), /Админ-команды/, `${u} should be an admin`);
     }
   });
+
+  test("ADMIN_USER_IDS: admin by immutable user id (any username)", async () => {
+    const env = makeEnv({ ADMIN_USER_IDS: "777, 999" });
+    const ok = makeCtxFor(makeMsg({ from: { id: 999, username: "stranger" }, chatType: "private" }), env);
+    assert.match(await COMMANDS.admin(ok, { argText: "" }), /Админ-команды/);
+    const no = makeCtxFor(makeMsg({ from: { id: 123, username: "stranger" }, chatType: "private" }), env);
+    assert.equal(await COMMANDS.admin(no, { argText: "" }), null); // a different id is not an admin
+  });
   test("ADMIN_USERNAMES: case-insensitive username comparison", async () => {
     const env = makeEnv({ ADMIN_USERNAMES: "alice" });
     const ctx = makeCtxFor(makeMsg({ username: "ALICE", chatType: "private" }), env);

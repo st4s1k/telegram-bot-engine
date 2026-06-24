@@ -78,11 +78,13 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
   //   /admin chat_cmd <id> <command> — run a command in another chat
   admin: async (ctx, mode) => {
     const who = (ctx.msg?.from?.username || "").toLowerCase();
+    const fromId = ctx.msg?.from?.id;
     const isPrivate = ctx.msg?.chat?.type === "private";
-    // The command is available only to admins (env ADMIN_USERNAMES; empty → no admins) AND only in private chats
-    // (so as not to expose it in groups). In any other case — behave as with an ordinary
-    // message (do not reveal its existence).
-    if (!isPrivate || !who || !ctx.cfg.adminUsernames.includes(who)) {
+    // Admins = ADMIN_USERNAMES (mutable @handle) OR ADMIN_USER_IDS (immutable account id — preferred), AND
+    // only in private chats (don't expose it in groups). Otherwise behave as an ordinary message (no hint).
+    const isAdmin = (!!who && ctx.cfg.adminUsernames.includes(who))
+      || (fromId != null && ctx.cfg.adminUserIds.includes(Number(fromId)));
+    if (!isPrivate || !isAdmin) {
       return null;
     }
     const lang = ctx.cfg.lang;
