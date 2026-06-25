@@ -1,0 +1,52 @@
+{
+  // ── Deployment config TEMPLATE for a bot built on telegram-bot-engine ──────────────────────────
+  // Copy this into YOUR pack/deployment repo. The CI (see deploy.yml) clones the engine, copies this
+  // file to engine/wrangler.jsonc, stages your pack via PERSONA_PACK, then `wrangler deploy`s.
+  // Replace every <PLACEHOLDER>. The resource ids (database_id, KV id, index_name) point at LIVE data —
+  // create them once (see examples/deployment/README.md) and never change them afterwards.
+  "name": "<your-bot-name>",                 // the Worker name on Cloudflare
+  "account_id": "<your-cloudflare-account-id>",
+  "main": "src/index.ts",                    // the engine entry — keep as-is
+  "compatibility_date": "2025-10-31",
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+
+  // Plaintext config. A deploy REPLACES the worker's vars, so EVERY var you rely on must live here
+  // (anything omitted falls back to the engine's code default). Secrets do NOT go here — see .dev.vars.example.
+  "vars": {
+    "BOT_NAME": "<Your Bot>",
+    "BOT_USERNAME": "<your_bot>",            // without @ — used to strip @mentions and match /cmd@bot
+    "BOT_LANG": "en",                        // engine UI language (any discovered locale); per-chat via /config lang
+    "BOT_TZ": "UTC",                         // IANA tz for timestamps + the daily-summary cron gate (see crons)
+    "ADMIN_USERNAMES": "<your_username>",    // CSV, without @ — access to the hidden /admin
+    "ADMIN_USER_IDS": "",                    // CSV of immutable Telegram user ids (preferred over usernames)
+    "ADMIN_CHAT_IDS": "",                    // CSV of chat ids that receive critical error alerts (empty → log only)
+    "OPENROUTER_MODEL": "openrouter/free",
+    "OPENROUTER_HOST": "https://openrouter.ai/api/v1",
+    "OPENROUTER_TITLE": "<Your Bot>",
+    "ANSWER_PROB": "0.05",                   // group: unprompted-reply probability when not addressed
+    "MAX_HISTORY_CHARS": "8000",
+    "MAX_TOKENS": "4000",
+    "ENABLE_REASONING": "true",
+    "ENABLE_VISION": "false",
+    "ENABLE_RAG": "false"                    // long-term memory (needs the VECTORIZE + AI bindings below)
+  },
+
+  "kv_namespaces": [
+    { "binding": "KV", "id": "<your-kv-namespace-id>" }   // dedup flags + alert/menu throttles
+  ],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "<your-db-name>", "database_id": "<your-d1-database-id>" }
+  ],
+  "ai": { "binding": "AI" },                 // Workers AI — embeddings for RAG (free to bind)
+  "vectorize": [
+    { "binding": "VECTORIZE", "index_name": "<your-vectorize-index>" }  // 1024-dim cosine; only needed if RAG is on
+  ],
+
+  // Daily maintenance (curation + optional summary). The engine gates on 08:00 in BOT_TZ.
+  //  • BOT_TZ = UTC  → a single "0 8 * * *".
+  //  • A DST zone (e.g. Europe/...) → TWO fires so exactly one lands on local 08:00 across the year, e.g.
+  //    "0 5 * * *" (summer, UTC+3) and "0 6 * * *" (winter, UTC+2). The engine ignores the non-08:00 fire.
+  "triggers": {
+    "crons": ["0 8 * * *"]
+  }
+}

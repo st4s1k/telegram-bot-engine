@@ -1,0 +1,20 @@
+# Worker SECRETS template. These are write-only on the Worker and persist across deploys (a deploy does
+# NOT wipe them, unlike the plaintext `vars` in wrangler.jsonc). Never commit real values.
+#
+# Local dev: copy to `.dev.vars` (gitignored) for `wrangler dev`.
+# Production: set each with `npx wrangler secret put <NAME>` (or your CI's secret store), NOT in vars.
+
+# Telegram bot token from @BotFather (required).
+TELEGRAM_BOT_TOKEN=123456:your-telegram-bot-token
+
+# OpenRouter API key for chat completions (required).
+OPENROUTER_API_KEY=sk-or-your-openrouter-key
+
+# OpenRouter provisioning key (optional) — lets /model show the full account balance/limit.
+OPENROUTER_PROVISIONING_KEY=
+
+# Webhook origin secret (optional but recommended). Set this AND register the webhook with the same
+# secret_token (see setWebhook.mjs) — the worker then rejects any POST whose
+# X-Telegram-Bot-Api-Secret-Token header doesn't match. Without it, anyone who learns the worker URL
+# can forge Updates (and, since /admin trusts msg.from.username, impersonate an admin).
+TELEGRAM_WEBHOOK_SECRET=

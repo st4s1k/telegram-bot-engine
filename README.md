@@ -232,6 +232,10 @@ and runs `wrangler deploy` against its own resources/secrets.
 
 A manual `npx wrangler deploy` is an emergency fallback (apply migrations and stage the pack first).
 
+**Scaffold:** [`examples/deployment/`](examples/deployment/) has copy-paste templates — a `wrangler.jsonc`
+(bindings/vars/crons), a `deploy.yml` (clone engine → stage pack → gate → migrate → deploy), a
+`.dev.vars.example` (secrets), and a `setWebhook.mjs` helper — with a step-by-step README.
+
 ## Configuration
 
 Engine env vars live in the deployment's `wrangler.jsonc` → `vars` (all optional, with defaults):
