@@ -224,9 +224,16 @@ export async function reportError(env: Env, where: string, err: any, opts: { cri
     .split(",").map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n !== 0);
   if (!adminChats.length) return;
   try {
+    // Throttle: 1 alert per `where` in 10 min. Fail-OPEN — if the KV read throws we still alert: a KV
+    // outage is exactly when a critical failure must reach the admins, and over-alerting beats a silent
+    // blackout. The throttle write is best-effort too (a missed write just means the next one isn't muted).
     const key = "errnotify:" + where;
-    if (env.KV && await env.KV.get(key)) return;     // already alerted recently — stay silent
-    if (env.KV) await env.KV.put(key, "1", { expirationTtl: 600 });
+    let throttled = false;
+    if (env.KV) {
+      try { throttled = !!(await env.KV.get(key)); } catch { /* KV down → don't suppress the alert */ }
+    }
+    if (throttled) return;                            // alerted recently — stay silent
+    if (env.KV) { try { await env.KV.put(key, "1", { expirationTtl: 600 }); } catch { /* best-effort */ } }
     const text = t(env.BOT_LANG || DEFAULT_LANG, "err_admin_alert", env.BOT_NAME || "Bot", where, msg);
     await Promise.all(adminChats.map(id => sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, id, text, undefined)));
   } catch (e: any) {

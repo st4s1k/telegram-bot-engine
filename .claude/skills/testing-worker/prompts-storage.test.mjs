@@ -286,6 +286,38 @@ describe("chatData mutators", () => {
     assert.equal(ctx.chatData._dirty, true);
   });
 
+  test("spend survives a flush → reload round-trip", async () => {
+    const env = makeEnv();
+    await seedChat(env, 700, {});
+    const cd = await getChatData(700, env);
+    const ctx = makeCtxFor(makeMsg({ chatId: 700 }), env, cd);
+    addSpend(ctx, 0.002);
+    addSpend(ctx, 0.003);
+    await flushChatData(700, env, ctx.chatData);
+    const reloaded = await getChatData(700, env);
+    assert.ok(Math.abs(reloaded.spend - 0.005) < 1e-9);
+    assert.equal(reloaded.spendCount, 2);
+  });
+
+  // The cross-isolate spend race (two overlapping webhooks for the same chat) is a KNOWN, ACCEPTED
+  // cosmetic gap: the chats-row flush is last-write-wins, so a concurrent increment can be lost. Real
+  // billing is OpenRouter /credits, not this counter — so the cheap atomic-delta fix is deferred (see the
+  // durable-objects-rejected decision). This test PINS that accepted behavior so it isn't "fixed" by accident.
+  test("overlapping flushes are last-write-wins (documents the accepted cosmetic spend race)", async () => {
+    const env = makeEnv();
+    await seedChat(env, 701, { spend: 0 });
+    const a = await getChatData(701, env); // isolate A reads spend=0
+    const b = await getChatData(701, env); // isolate B reads spend=0 (overlapping)
+    const ctxA = makeCtxFor(makeMsg({ chatId: 701 }), env, a);
+    const ctxB = makeCtxFor(makeMsg({ chatId: 701 }), env, b);
+    addSpend(ctxA, 0.01);
+    addSpend(ctxB, 0.02);
+    await flushChatData(701, env, ctxA.chatData);
+    await flushChatData(701, env, ctxB.chatData); // B flushes after A → overwrites
+    const reloaded = await getChatData(701, env);
+    assert.ok(Math.abs(reloaded.spend - 0.02) < 1e-9); // A's 0.01 is lost — accepted (cosmetic)
+  });
+
   test("cachePhotoDesc: LRU cache with a PHOTO_CACHE_CAP ceiling", () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     for (let i = 0; i < PHOTO_CACHE_CAP + 5; i++) cachePhotoDesc(ctx, "k" + i, "d" + i);

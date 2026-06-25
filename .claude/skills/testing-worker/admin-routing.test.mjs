@@ -296,6 +296,17 @@ describe("default.fetch (webhook)", () => {
     assert.equal(FETCH.sends().length, 1); // not processed the second time
   });
 
+  test("KV failure in dedup is fail-open → the message is still processed", async () => {
+    const env = makeEnv();
+    env.KV = { get: async () => { throw new Error("kv down"); }, put: async () => {} };
+    FETCH.set("chat", () => sse(["отвечу несмотря на сбой KV"]));
+    const upd = { update_id: 4242, message: makeMsg({ chatType: "private", chatId: 555, text: "привет" }) };
+    const res = await WORKER.fetch(post(upd), env, ctxObj);
+    assert.equal(await res.text(), "ok");
+    assert.equal(FETCH.sends().length, 1); // processed despite KV being down (not dropped)
+    assert.ok(CONSOLE.warn.some(l => l.includes("dedup check failed")));
+  });
+
   test("an error in the handler is swallowed → always ok", async () => {
     const env = makeEnv();
     delete env.DB; // appendHistory throws (no DB) → WORKER.fetch catches it
@@ -342,6 +353,41 @@ describe("audit: entry point and routing", () => {
     await handleTelegramMessage(makeMsg({ chatType: "private", chatId: 555, text: "привет" }), env);
     assert.equal(FETCH.sends().length, 1);
     assert.ok(CONSOLE.error.some(l => l.includes("flushChatData")));
+  });
+
+  test("getChatData read failure → critical admin alert (to ADMIN_CHAT_IDS)", async () => {
+    const env = makeEnv({ ADMIN_CHAT_IDS: "999" });
+    await seedChat(env, 556, { role: "x" });
+    const realDB = env.DB;
+    env.DB = {
+      prepare(sql) {
+        if (sql.includes("SELECT * FROM chats")) return { bind: () => ({ first: async () => { throw new Error("d1 read down"); } }) };
+        return realDB.prepare(sql);
+      },
+      batch: (s) => realDB.batch(s),
+    };
+    FETCH.set("chat", () => sse(["ок"]));
+    await handleTelegramMessage(makeMsg({ chatType: "private", chatId: 556, text: "привет" }), env);
+    const alerts = FETCH.sends().filter(s => s.body.chat_id === 999); // the reply goes to 556, the alert to 999
+    assert.equal(alerts.length, 1);
+    assert.ok(alerts[0].body.text.includes("getChatData"));
+  });
+
+  test("flushChatData write failure → critical admin alert (to ADMIN_CHAT_IDS)", async () => {
+    const env = makeEnv({ ADMIN_CHAT_IDS: "999" });
+    const realDB = env.DB;
+    env.DB = {
+      prepare(sql) {
+        if (sql.includes("INSERT INTO chats")) return { bind: () => ({ run: async () => { throw new Error("d1 down"); } }) };
+        return realDB.prepare(sql);
+      },
+      batch: (s) => realDB.batch(s),
+    };
+    FETCH.set("chat", () => sse(["ок"]));
+    await handleTelegramMessage(makeMsg({ chatType: "private", chatId: 555, text: "привет" }), env);
+    const alerts = FETCH.sends().filter(s => s.body.chat_id === 999);
+    assert.equal(alerts.length, 1);
+    assert.ok(alerts[0].body.text.includes("flushChatData"));
   });
 
   test("a chats READ failure in getChatData does not overwrite the real row with defaults", async () => {

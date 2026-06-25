@@ -158,6 +158,13 @@ describe("reportError", () => {
     await reportError(env, "runDailySummaries[chat]", new Error("nope"));
     assert.equal(FETCH.sends().length, 0);
   });
+
+  test("KV throttle read failure is fail-open → the critical alert is still sent", async () => {
+    const env = makeEnv({ ADMIN_CHAT_IDS: "999" });
+    env.KV = { get: async () => { throw new Error("kv down"); }, put: async () => {} };
+    await reportError(env, "flushChatData", new Error("d1 down"), { critical: true });
+    assert.equal(FETCH.sends().filter(s => s.body.chat_id === 999).length, 1); // not suppressed by the KV outage
+  });
 });
 
 
