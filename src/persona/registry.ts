@@ -28,6 +28,9 @@ export interface RegisteredCommand {
   llm?: boolean;
   skipHistory?: boolean;
   remoteAdmin?: boolean;
+  /** i18n key for the native command-menu description (Telegram setMyCommands). A command WITHOUT
+   *  menuDesc is omitted from the menu (e.g. the hidden /admin). Resolved per locale via t(lang, menuDesc). */
+  menuDesc?: string;
   /** optional slice of per-chat state owned by this command (schema: field→type/default/bounds).
    *  The engine merges the slices of all commands into persona-state and applies defaults — so a "command with its own
    *  state" plugs in trivially (see getPersonaStateDefaults). */

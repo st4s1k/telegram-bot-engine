@@ -3,6 +3,7 @@ const {
   test, describe, assert, WORKER,
   // worker.js — functions and constants
   toMarkdownV2, sendTelegramMessage, sendAndStore, isFallbackMessage, reportError,
+  buildBotCommands, syncBotCommands, botCommandsFingerprint, maybeSyncBotCommands,
   dedupeHistory, collapseConsecutiveDuplicates, trimHistoryByChars, historyChars,
   appendHistory, updateHistoryMessage,
   getGlobalConfig, mergeConfig, parseConfigValue, setConfigParam, buildConfigHelp,
@@ -164,6 +165,64 @@ describe("reportError", () => {
     env.KV = { get: async () => { throw new Error("kv down"); }, put: async () => {} };
     await reportError(env, "flushChatData", new Error("d1 down"), { critical: true });
     assert.equal(FETCH.sends().filter(s => s.body.chat_id === 999).length, 1); // not suppressed by the KV outage
+  });
+});
+
+
+describe("native command menu (setMyCommands)", () => {
+  test("buildBotCommands: engine commands with menuDesc, /admin excluded, no leading slash", () => {
+    const cmds = buildBotCommands("en");
+    const names = cmds.map(c => c.command);
+    assert.ok(names.includes("help"));
+    assert.ok(names.includes("config"));
+    assert.ok(!names.includes("admin"));            // hidden — no menuDesc
+    assert.ok(cmds.every(c => /^[a-z0-9_]{1,32}$/.test(c.command))); // Telegram-valid
+    assert.ok(cmds.every(c => c.description.length > 0 && c.description.length <= 256));
+  });
+
+  test("buildBotCommands: descriptions are localized per the passed lang", () => {
+    const en = buildBotCommands("en").find(c => c.command === "help");
+    const ru = buildBotCommands("ru").find(c => c.command === "help");
+    assert.notEqual(en.description, ru.description); // menu_help differs en vs ru
+  });
+
+  test("syncBotCommands: a default call + one per discovered locale; counts successes", async () => {
+    const env = makeEnv();
+    const ok = await syncBotCommands(env);
+    const calls = FETCH.of("/setMyCommands");
+    // default (no language_code) + one per discovered 2-letter locale (en, ru)
+    assert.ok(calls.some(c => c.body.language_code === undefined));
+    assert.ok(calls.some(c => c.body.language_code === "en"));
+    assert.ok(calls.some(c => c.body.language_code === "ru"));
+    assert.equal(ok, calls.length); // all mocked calls succeed
+  });
+
+  test("syncBotCommands: no token → no calls", async () => {
+    const env = makeEnv({ TELEGRAM_BOT_TOKEN: "" });
+    const ok = await syncBotCommands(env);
+    assert.equal(ok, 0);
+    assert.equal(FETCH.of("/setMyCommands").length, 0);
+  });
+
+  test("botCommandsFingerprint is a stable non-empty string", () => {
+    assert.equal(botCommandsFingerprint(), botCommandsFingerprint());
+    assert.ok(botCommandsFingerprint().length > 0);
+  });
+
+  test("maybeSyncBotCommands: syncs once, then the KV fingerprint flag mutes it", async () => {
+    const env = makeEnv();
+    await maybeSyncBotCommands(env);
+    const after1 = FETCH.of("/setMyCommands").length;
+    assert.ok(after1 > 0);
+    await maybeSyncBotCommands(env); // same fingerprint → flag set → no-op
+    assert.equal(FETCH.of("/setMyCommands").length, after1);
+  });
+
+  test("maybeSyncBotCommands: a KV read failure is fail-open (still syncs)", async () => {
+    const env = makeEnv();
+    env.KV = { get: async () => { throw new Error("kv down"); }, put: async () => {} };
+    await maybeSyncBotCommands(env);
+    assert.ok(FETCH.of("/setMyCommands").length > 0);
   });
 });
 

@@ -3,9 +3,10 @@
 // fallback to plain, the "typing" indicator, splitting long messages, writing to history.
 
 import { TELEGRAM_MSG_LIMIT, GETFILE_TIMEOUT_MS } from "./constants";
-import { t, DEFAULT_LANG } from "./i18n";
+import { t, DEFAULT_LANG, LOCALES } from "./i18n";
 import { isFallbackMessage, buildAssistantItem } from "./utils";
 import { appendHistory } from "./storage";
+import { getAllCommands } from "./persona/registry";
 import type { Ctx, Env, TgSendResult } from "./types";
 
 // All MarkdownV2 special characters that require escaping in plain text.
@@ -239,4 +240,76 @@ export async function reportError(env: Env, where: string, err: any, opts: { cri
   } catch (e: any) {
     console.error("reportError: notify failed", { err: e?.message || e });
   }
+}
+
+/* ================= NATIVE COMMAND MENU (setMyCommands) ================= */
+
+// The {command, description} list for the native "/" menu in one locale. Only commands carrying a
+// `menuDesc` i18n key are shown (so the hidden /admin is excluded); the description is resolved per locale
+// and clamped to Telegram's 256-char limit. command = defaultCmd minus the leading slash; anything that
+// doesn't fit Telegram's /^[a-z0-9_]{1,32}$/ is skipped. Order follows getAllCommands (engine, then pack).
+export function buildBotCommands(lang: string): { command: string; description: string }[] {
+  const out: { command: string; description: string }[] = [];
+  for (const c of getAllCommands()) {
+    if (!c.menuDesc) continue;
+    const command = c.defaultCmd.replace(/^\//, "").toLowerCase();
+    if (!/^[a-z0-9_]{1,32}$/.test(command)) continue;
+    const description = t(lang, c.menuDesc).slice(0, 256).trim();
+    if (description) out.push({ command, description });
+  }
+  return out;
+}
+
+// A short, stable fingerprint of the menu surface (command names + their menuDesc keys + the locale set).
+// It changes only when a deploy alters the command set / locales — so the guarded auto-sync re-runs exactly
+// once after such a change and stays quiet otherwise.
+export function botCommandsFingerprint(): string {
+  const cmds = getAllCommands().filter(c => c.menuDesc).map(c => `${c.defaultCmd}:${c.menuDesc}`).sort();
+  const raw = `${LOCALES.slice().sort().join(",")}|${cmds.join(",")}`;
+  let h = 5381;
+  for (let i = 0; i < raw.length; i++) h = ((h << 5) + h + raw.charCodeAt(i)) >>> 0; // djb2
+  return h.toString(36);
+}
+
+// Push the command menu to Telegram: a default list (no language_code, in BOT_LANG) plus one per discovered
+// 2-letter locale (language_code). Telegram shows the list matching the user's client language, falling back
+// to the default. Idempotent + best-effort — a failed call is logged, never thrown. Returns the success count.
+export async function syncBotCommands(env: Env): Promise<number> {
+  const token = env.TELEGRAM_BOT_TOKEN;
+  if (!token) return 0;
+  const url = `https://api.telegram.org/bot${token}/setMyCommands`;
+  const call = async (commands: { command: string; description: string }[], language_code?: string): Promise<boolean> => {
+    if (!commands.length) return false;
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(language_code ? { commands, language_code } : { commands }),
+        signal: AbortSignal.timeout(GETFILE_TIMEOUT_MS),
+      });
+      const data: any = await res.json().catch(() => null);
+      if (!data?.ok) { console.warn("setMyCommands failed", { language_code, description: data?.description }); return false; }
+      return true;
+    } catch (e: any) {
+      console.warn("setMyCommands threw", { language_code, err: e?.message || e });
+      return false;
+    }
+  };
+  let ok = 0;
+  if (await call(buildBotCommands(env.BOT_LANG || DEFAULT_LANG))) ok++;   // default (no language_code)
+  for (const lang of LOCALES) {
+    if (/^[a-z]{2}$/.test(lang) && await call(buildBotCommands(lang), lang)) ok++; // Telegram wants ISO-639-1
+  }
+  return ok;
+}
+
+// Auto-sync the menu at most once per fingerprint — called from scheduled() (cron). A KV flag keyed by the
+// fingerprint makes it idempotent: it runs once after a command-set change, then stays silent. Fail-open on
+// a KV read error (sync anyway). Without KV (shouldn't happen in prod) it just syncs each cron fire.
+export async function maybeSyncBotCommands(env: Env): Promise<void> {
+  if (!env.KV) { await syncBotCommands(env); return; }
+  const key = "botcommands:" + botCommandsFingerprint();
+  try { if (await env.KV.get(key)) return; } catch { /* KV down → fall through and sync */ }
+  await syncBotCommands(env);
+  try { await env.KV.put(key, "1", { expirationTtl: 60 * 60 * 24 * 30 }); } catch { /* best-effort */ }
 }

@@ -276,6 +276,14 @@ re-registered by someone else). A user is an admin if they match *either* list. 
 Control commands persist their effect in the target chat; **LLM commands are a preview**: they are not
 written to the target chat's history/memory/state.
 
+### Native command menu
+
+Commands that carry a `menuDesc` (an i18n key) appear in Telegram's "/" command menu / autocomplete,
+localized per the user's client language (a default list in `BOT_LANG` plus one per discovered 2-letter
+locale). The menu refreshes automatically once after a deploy that changes the command set (the cron
+calls `maybeSyncBotCommands`, guarded by a fingerprint flag in KV); **`/admin commands`** force-refreshes
+it on demand. `/admin` itself has no `menuDesc`, so it stays hidden from the menu.
+
 ## For agents / contributors
 
 - **[CLAUDE.md](CLAUDE.md)** — core architecture, invariants (write-through history, dedup, layering),

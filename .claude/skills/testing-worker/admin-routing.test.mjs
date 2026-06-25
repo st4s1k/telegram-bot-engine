@@ -242,6 +242,7 @@ describe("handleTelegramMessage", () => {
 
   test("unknown /command@otherbot in a group → silent (it's for another bot)", async () => {
     const env = makeEnv();
+    await seedChat(env, -100, { config: { random: false } }); // not addressed → no random roll → deterministic
     await handleTelegramMessage(makeMsg({ chatType: "group", chatId: -100, text: "/foobar@otherbot" }), env);
     assert.equal(FETCH.sends().length, 0);
   });
@@ -424,5 +425,11 @@ describe("audit: admin helpers", () => {
   test("admin chat_cmd with a non-numeric id → error", async () => {
     const ctx = makeCtxFor(makeMsg({ username: "admin", chatType: "private" }), makeEnv());
     assert.match(await COMMANDS.admin(ctx, { argText: "chat_cmd rp ты" }), /числовой chatId/);
+  });
+  test("/admin commands → syncs the native menu and reports the count", async () => {
+    const ctx = makeCtxFor(makeMsg({ username: "admin", chatType: "private" }), makeEnv());
+    const out = await COMMANDS.admin(ctx, { argText: "commands" });
+    assert.ok(FETCH.of("/setMyCommands").length > 0);
+    assert.match(out, /setMyCommands/);
   });
 });

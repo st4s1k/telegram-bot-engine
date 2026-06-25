@@ -44,6 +44,20 @@
   "mem_extract_known": "Already known (do NOT repeat or duplicate this):",
 
   "cmd_unknown": "🤷 I don't know the command `{0}`.\nType `/help` for the list of commands.",
+
+  "menu_start": "Start / about the bot",
+  "menu_help": "Commands & help",
+  "menu_info": "Status & settings",
+  "menu_config": "Chat settings",
+  "menu_model": "Model & balance",
+  "menu_memory": "Manage memory",
+  "menu_summary": "Digest of what's new",
+  "menu_rp": "Set a role",
+  "menu_lang": "Interface language",
+  "menu_alias": "Name aliases",
+  "menu_stop": "Pause the bot",
+  "menu_resume": "Resume the bot",
+
   "cmd_stop": "😴 Okay, going quiet. (Use /resume to wake me)",
   "cmd_resume": "😎 Back. I'm with you again.",
   "rp_reset": "🎭 Role reset.",
@@ -166,8 +180,10 @@
     "`/admin chat <id>` — session details",
     "`/admin chat_cmd <id> <command>` — run ANY command in chat <id> (reply goes to you)",
     "   e.g. `/admin chat_cmd -100123 rp you are polite` · `/admin chat_cmd -100123 info`",
-    "   content (LLM) commands are a preview: not written to the target chat"
+    "   content (LLM) commands are a preview: not written to the target chat",
+    "`/admin commands` — refresh the native command menu (setMyCommands) now"
   ],
+  "adm_commands_synced": "✅ Command menu refreshed ({0} setMyCommands call(s) OK).",
   "adm_no_sessions": "📭 No active sessions.",
   "adm_sessions_header": [
     "🛠 *Sessions* ({0})",

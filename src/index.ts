@@ -10,7 +10,7 @@
 // without it — the neutral ./default. The engine does not know the name of any specific pack.
 import "./persona/active";
 import { handleTelegramMessage, runDailySummaries } from "./flow";
-import { reportError } from "./telegram";
+import { reportError, maybeSyncBotCommands } from "./telegram";
 import type { Env, TgUpdate } from "./types";
 
 export default {
@@ -63,6 +63,13 @@ export default {
   // the «08:00 in cfg.timezone» gate and the dispatch itself live inside runDailySummaries (so it's testable).
   // We take the time from event.scheduledTime (not Date.now). We swallow errors so the cron doesn't fail noisily.
   async scheduled(event: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    // Refresh the native command menu when the command set changed (guarded by a fingerprint KV flag, so
+    // it's effectively once per deploy-that-changes-commands). Best-effort — never blocks the summaries.
+    try {
+      await maybeSyncBotCommands(env);
+    } catch (e: any) {
+      await reportError(env, "maybeSyncBotCommands", e);
+    }
     try {
       await runDailySummaries(env, event.scheduledTime);
     } catch (e: any) {

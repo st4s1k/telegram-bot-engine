@@ -13,7 +13,7 @@ import {
 } from "./storage";
 import { CONFIG_SCHEMA, CONFIG_PRESETS, getGlobalConfig, mergeConfig, buildHelp, buildConfigHelp, buildConfigGroupHelp, findConfigGroup, buildInfoStatus, setConfigParam } from "./config";
 import { fetchModelPrice, fetchOpenRouterUsage } from "./llm";
-import { sendTyping, sendAndStore } from "./telegram";
+import { sendTyping, sendAndStore, syncBotCommands } from "./telegram";
 import { runIncrementalSummary } from "./summary";
 import { runMemoryCuration } from "./curation";
 import { getPersona, getPersonaStateDefaults, getAllCommands, setEngineCommands } from "./persona/registry";
@@ -135,6 +135,13 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
       }
       lines.push("", t(lang, "adm_total_spend", totalSpend.toFixed(4)));
       return lines.join("\n");
+    }
+
+    // /admin commands — force-refresh the native command menu now (the cron auto-syncs on a change, but
+    // this gives instant feedback right after a deploy). Reports how many setMyCommands calls succeeded.
+    if (sub === "commands") {
+      const n = await syncBotCommands(ctx.env);
+      return t(lang, "adm_commands_synced", n);
     }
 
     if (sub === "stats") {
@@ -553,20 +560,22 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
 // name (defaultCmd) + flags (llm/skipHistory) + handler in a single object. Order = priority in the regex
 // (the core names do not overlap by prefix). They are all tech (skipHistory) — service output, not the bot's speech;
 // summary is additionally llm (we show "typing"), but its output is not written to history either.
+// menuDesc → the native command-menu description (i18n key); a command WITHOUT it is hidden from the menu
+// (e.g. /admin). The menu order follows this list (engine), then the pack's commands.
 const ENGINE_COMMAND_PLUGINS: RegisteredCommand[] = [
   { type: "admin",   defaultCmd: "/admin",   skipHistory: true, handler: ENGINE_COMMANDS.admin },
-  { type: "help",    defaultCmd: "/help",    skipHistory: true, handler: ENGINE_COMMANDS.help },
-  { type: "config",  defaultCmd: "/config",  skipHistory: true, handler: ENGINE_COMMANDS.config },
-  { type: "memory",  defaultCmd: "/memory",  skipHistory: true, handler: ENGINE_COMMANDS.memory },
-  { type: "model",   defaultCmd: "/model",   skipHistory: true, handler: ENGINE_COMMANDS.model },
-  { type: "summary", defaultCmd: "/summary", llm: true, skipHistory: true, handler: ENGINE_COMMANDS.summary },
-  { type: "rp",      defaultCmd: "/rp",      skipHistory: true, handler: ENGINE_COMMANDS.rp },
-  { type: "info",    defaultCmd: "/info",    skipHistory: true, handler: ENGINE_COMMANDS.info },
-  { type: "stop",    defaultCmd: "/stop",    skipHistory: true, handler: ENGINE_COMMANDS.stop },
-  { type: "resume",  defaultCmd: "/resume",  skipHistory: true, handler: ENGINE_COMMANDS.resume },
-  { type: "lang",    defaultCmd: "/lang",    skipHistory: true, handler: ENGINE_COMMANDS.lang },
-  { type: "alias",   defaultCmd: "/alias",   skipHistory: true, handler: ENGINE_COMMANDS.alias },
-  { type: "start",   defaultCmd: "/start",   skipHistory: true, handler: ENGINE_COMMANDS.start },
+  { type: "start",   defaultCmd: "/start",   skipHistory: true, menuDesc: "menu_start",   handler: ENGINE_COMMANDS.start },
+  { type: "help",    defaultCmd: "/help",    skipHistory: true, menuDesc: "menu_help",    handler: ENGINE_COMMANDS.help },
+  { type: "info",    defaultCmd: "/info",    skipHistory: true, menuDesc: "menu_info",    handler: ENGINE_COMMANDS.info },
+  { type: "config",  defaultCmd: "/config",  skipHistory: true, menuDesc: "menu_config",  handler: ENGINE_COMMANDS.config },
+  { type: "model",   defaultCmd: "/model",   skipHistory: true, menuDesc: "menu_model",   handler: ENGINE_COMMANDS.model },
+  { type: "memory",  defaultCmd: "/memory",  skipHistory: true, menuDesc: "menu_memory",  handler: ENGINE_COMMANDS.memory },
+  { type: "summary", defaultCmd: "/summary", llm: true, skipHistory: true, menuDesc: "menu_summary", handler: ENGINE_COMMANDS.summary },
+  { type: "rp",      defaultCmd: "/rp",      skipHistory: true, menuDesc: "menu_rp",      handler: ENGINE_COMMANDS.rp },
+  { type: "lang",    defaultCmd: "/lang",    skipHistory: true, menuDesc: "menu_lang",    handler: ENGINE_COMMANDS.lang },
+  { type: "alias",   defaultCmd: "/alias",   skipHistory: true, menuDesc: "menu_alias",   handler: ENGINE_COMMANDS.alias },
+  { type: "stop",    defaultCmd: "/stop",    skipHistory: true, menuDesc: "menu_stop",    handler: ENGINE_COMMANDS.stop },
+  { type: "resume",  defaultCmd: "/resume",  skipHistory: true, menuDesc: "menu_resume",  handler: ENGINE_COMMANDS.resume },
 ];
 // Register the core in the registry — now the engine and the pack are a single plugin list (getAllCommands).
 setEngineCommands(ENGINE_COMMAND_PLUGINS);

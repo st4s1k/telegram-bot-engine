@@ -106,6 +106,7 @@ function defaultResponders() {
     chatAction: () => jsonResp({ ok: true, result: true }),
     getFile: () => jsonResp({ ok: true, result: { file_path: "photos/f.jpg" } }),
     getChat: () => jsonResp({ ok: true, result: { title: "Группа" } }),
+    setMyCommands: () => jsonResp({ ok: true, result: true }),
   };
 }
 function resetFetch() { _calls = []; _responders = defaultResponders(); }
@@ -133,6 +134,7 @@ globalThis.fetch = async (url, opts = {}) => {
     if (u.includes("/sendMessage")) return _responders.send(call);
     if (u.includes("/sendChatAction")) return _responders.chatAction(call);
     if (u.includes("/getFile")) return _responders.getFile(call);
+    if (u.includes("/setMyCommands")) return _responders.setMyCommands(call);
     if (u.includes("/getChat")) return _responders.getChat(call);
     throw new Error("unexpected fetch: " + method + " " + u);
   };
