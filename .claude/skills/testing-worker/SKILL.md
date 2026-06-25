@@ -30,6 +30,21 @@ npm run check     # tsc --noEmit (alias of typecheck)
 
 `npm test` ends with `Tests N passed`. Vitest config (`vitest.config.mts`) points `include` at `.claude/skills/testing-worker/*.test.mjs`.
 
+### Gate = three persona builds
+
+The engine is persona-free, so the gate runs the suite **three times** — once neutral and once per pack — and all three must be green + typecheck-clean before a deploy:
+
+```
+# 1) neutral (personaless engine)
+unset PERSONA_PACK;            npm run typecheck && npm test
+# 2) the «Фасол» pack
+PERSONA_PACK=../fasoliz-bot-persona  npm run typecheck && npm test
+# 3) the demo pack
+PERSONA_PACK=../telegram-bot-persona npm run typecheck && npm test
+```
+
+`pretest`/`pretypecheck` run `scripts/select-persona.mjs`, which (a) stages the pack's `*.ts` + `i18n/` into `src/persona/_pack/`, (b) regenerates the i18n manifest, and (c) **auto-stages the pack's tests**: it copies `<PERSONA_PACK>/tests/*.persona.test.mjs` into this folder and clears any previously-staged pack tests first. So you do **not** copy pack tests by hand — just set `PERSONA_PACK` and run. Staged pack tests are gitignored (the `*.persona.test.mjs` glob) and removed again on the neutral run, so a leftover never pollutes another build. A pack test must therefore be named `*.persona.test.mjs` and import its surface from `./harness.mjs` (the engine harness it's staged next to).
+
 ## How the worker is made testable (test-export contract)
 
 Cloudflare runs only `export default { fetch }`. To unit-test internals, the entry **`src/index.ts` is a barrel**: after the default export it does `export * from "./constants"`, `"./utils"`, …, `"./flow"` — re-exporting every module's named exports. These re-exports are **inert at runtime** (the Worker uses only the default export).
