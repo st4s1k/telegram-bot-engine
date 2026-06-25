@@ -55,9 +55,11 @@ UI strings are externalized to `src/i18n/*.json` and resolved through `t(lang, k
 2. **Visual** (photo/sticker, own or from a reply) → `handlePhotoMessage`, *unless* the message is a command (commands win).
 3. Log incoming message to history.
 4. If `paused`, only commands are processed.
-5. **Quick replies** (`tryQuickReply`, from the pack) → **commands** (`tryCommand`) → **chat** (`handleChatMessage`).
+5. **Quick replies** (`tryQuickReply`, from the pack) → **commands** (`tryCommand`) → **unknown-command hint** → **chat** (`handleChatMessage`).
 
 `shouldAnswer` decides unprompted replies: always in private chats; in groups only on mention (`messageMentionsBot` = contains `@<botUsername>` or one of the pack's **wake words**) or random roll against `answer_prob`.
+
+**Unknown-command hint:** a message shaped like a bot command (`unknownCommandName` — `/name` or `/name@<botUsername>`, ASCII) that no plugin matched, AND addressed to us (private chat, `/cmd@ourbot`, or an @mention/wake word), gets a short `cmd_unknown` hint pointing at `/help` instead of being fed to the LLM. It's detected before step 3, so neither the call nor the hint is logged to history (no dangling user line); a bare `/foo` in a group (not addressed) and a `/foo@otherbot` are left alone. The hint sits after the pause gate, so a paused chat stays quiet.
 
 ### Commands
 
@@ -68,6 +70,8 @@ Commands are **plugins** — the engine's core commands use the same `Registered
 **Engine commands:** `help`, `config`, `info`, `model`, `memory`, `rp`, `stop`, `resume`, `summary`, `lang`, `alias`, and the hidden `admin`. Everything else (jokes, dice, mood, etc.) is **persona content** supplied by the pack.
 
 `/help` is **additive**: `buildHelp(lang)` renders the engine's base command list (the `help_engine` locale key) and **appends** the active persona's `helpText` (`persona_helpText`) below it — the pack *adds* to the base list, it does not replace it (without a pack only the base shows). `/lang` (no arg) shows the current language + the discovered `LOCALES`; `/lang <code>` switches, or **errors (language unchanged)** if `<code>` is not a discovered locale; `/config lang <code>` applies the **same** validation (`setConfigParam` rejects an unknown code via `LOCALES.includes` — no silent fallback).
+
+`/config` (no arg) → `buildConfigHelp` (all sections); `/config <key> <value>` sets a key; `/config <group>` (a localized group label or a `cfg_group_<suffix>`, resolved by `findConfigGroup`) → `buildConfigGroupHelp` renders **just that one section** (e.g. `/config rag` shows the RAG keys + a change hint). The group view fires only when **no value** is given, so `/config rag on` stays on the set path. `reset`/`preset` are handled before the group/key lookup.
 
 `/alias` manages **per-chat** display-name aliases (`username → name`): `/alias @user Name` sets one, bare `/alias` lists them, `/alias del @user` removes one (i18n keys `alias_*`). They live in the **reserved `aliases` object** on the per-chat config (`chats.config.aliases`, typed as `ChatConfig.aliases?: Record<string,string>` in `types.ts`) — **not** a `CONFIG_SCHEMA` scalar, so `mergeConfig` (which copies only `CONFIG_SCHEMA` keys) never leaks it into the effective `BotConfig`, and there's **no DB migration** (it rides the existing `config` JSON column). The name resolvers read it straight off `chatData.config` via the `chatAliases(ctx)` helper (`utils.ts`, returns `ctx.chatData.config.aliases ?? {}`) and merge it **over** the pack-static `usernameAliases` (per-chat wins). `resolveUserName`/`getUserName`/`pickTargetName`/`getUserMeta`/`buildUserItem` all take an optional `chatAliases`, and ctx-having call sites (`flow.ts` logging, `vision.ts`, the pack command/throw handlers) pass `chatAliases(ctx)` — so a `/alias` ALSO fixes the `[from:Name]` history tag the model sees (previously the tag used the raw `first_name`).
 

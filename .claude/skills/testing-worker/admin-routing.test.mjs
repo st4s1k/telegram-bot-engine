@@ -223,6 +223,36 @@ describe("handleTelegramMessage", () => {
     await handleTelegramMessage(makeMsg({ chatType: "group", chatId: -100, chatTitle: "Беседа", text: "@testbot привет" }), env);
     assert.equal((await dbChat(env, -100)).name, "Беседа");
   });
+
+  test("unknown /command in a private chat → hint, no LLM call, not stored in history", async () => {
+    const env = makeEnv();
+    await handleTelegramMessage(makeMsg({ chatType: "private", chatId: 555, text: "/foobar" }), env);
+    assert.equal(FETCH.of("/chat/completions").length, 0); // no LLM turn
+    assert.equal(FETCH.sends().length, 1);
+    assert.ok(FETCH.sends()[0].body.text.includes("/foobar")); // names the unknown command
+    assert.equal((await dbHistory(env, 555)).length, 0);       // neither the call nor the hint is logged
+  });
+
+  test("unknown /command@ourbot in a group → hint (addressed to us)", async () => {
+    const env = makeEnv();
+    await handleTelegramMessage(makeMsg({ chatType: "group", chatId: -100, text: "/foobar@testbot" }), env);
+    assert.equal(FETCH.sends().length, 1);
+    assert.ok(FETCH.sends()[0].body.text.includes("/foobar"));
+  });
+
+  test("unknown /command@otherbot in a group → silent (it's for another bot)", async () => {
+    const env = makeEnv();
+    await handleTelegramMessage(makeMsg({ chatType: "group", chatId: -100, text: "/foobar@otherbot" }), env);
+    assert.equal(FETCH.sends().length, 0);
+  });
+
+  test("bare unknown /command in a group (not addressed) → no hint", async () => {
+    const env = makeEnv();
+    const cd = { random: false }; // also disable random throws so the only possible send would be the hint
+    await seedChat(env, -100, { config: cd });
+    await handleTelegramMessage(makeMsg({ chatType: "group", chatId: -100, text: "/foobar" }), env);
+    assert.equal(FETCH.sends().length, 0);
+  });
 });
 
 

@@ -11,7 +11,7 @@ import {
   getChatData, flushChatData, saveChatConfig, setPaused, setRole,
   clearChatHistory, dedupeChatHistory, addMemory, listMemories, clearMemories, deleteMemory, parseJson, messageStats,
 } from "./storage";
-import { CONFIG_SCHEMA, CONFIG_PRESETS, getGlobalConfig, mergeConfig, buildHelp, buildConfigHelp, buildInfoStatus, setConfigParam } from "./config";
+import { CONFIG_SCHEMA, CONFIG_PRESETS, getGlobalConfig, mergeConfig, buildHelp, buildConfigHelp, buildConfigGroupHelp, findConfigGroup, buildInfoStatus, setConfigParam } from "./config";
 import { fetchModelPrice, fetchOpenRouterUsage } from "./llm";
 import { sendTyping, sendAndStore } from "./telegram";
 import { runIncrementalSummary } from "./summary";
@@ -61,6 +61,13 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
       }
       saveChatConfig(ctx, { ...ctx.chatData.config, ...preset.config });
       return t(lang, "cfg_preset_applied", name, t(lang, preset.desc));
+    }
+
+    // /config <group> (no value) — show just that section, e.g. `/config rag`. A trailing value means
+    // "set this key", so only match a group when no value was given. Keeps `/config rag on` on the set path.
+    if (!cmdVal.trim()) {
+      const g = findConfigGroup(lang, key);
+      if (g) return buildConfigGroupHelp(ctx.cfg, ctx.chatData.config || {}, g);
     }
 
     if (!CONFIG_SCHEMA[key]) {

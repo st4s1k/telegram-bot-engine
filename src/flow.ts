@@ -4,7 +4,7 @@
 
 import {
   makeCtx, shouldAnswer, parseCommandAndArg, chatTitleFromMsg, buildUserItem, visualLabel,
-  lastToken, pickOne, getReplyText, tzParts, chatAliases,
+  lastToken, pickOne, getReplyText, tzParts, chatAliases, messageMentionsBot, unknownCommandName,
 } from "./utils";
 import { getChatData, flushChatData, updateHistoryMessage, appendHistory, parseJson } from "./storage";
 import { getGlobalConfig, mergeConfig } from "./config";
@@ -12,7 +12,7 @@ import { sendAndStore, sendTyping, reportError } from "./telegram";
 import { runLLMWithHistory } from "./llm";
 import { buildReplyPrompt, buildDefaultPrompt } from "./prompts";
 import { isCommand, tryCommand, TECH_COMMANDS } from "./commands";
-import { tList } from "./i18n";
+import { t, tList } from "./i18n";
 import { runIncrementalSummary } from "./summary";
 import { runMemoryCuration } from "./curation";
 import { getPersonaQuickReplies, getPersonaThrows } from "./persona/registry";
@@ -55,6 +55,14 @@ export async function handleTelegramMessage(msg: TgMessage, env: Env, isEdit: bo
       return;
     }
 
+    // An unknown `/command` addressed to us (private chat, `/cmd@ourbot`, or an @mention/wakeword) — we'll
+    // reply with a hint instead of feeding "/foobar" to the LLM. Computed here so we also skip logging it
+    // to history (like a tech command) — its hint reply isn't stored either, so no dangling user line.
+    // A bare `/foo` in a group (not addressed) is left to the normal flow: it may be another bot's command.
+    const unknownCmd = !isCommand(mode.type) ? unknownCommandName(ctx.textRaw, ctx.cfg) : null;
+    const unknownCmdAddressed = !!unknownCmd
+      && (ctx.msg.chat?.type === "private" || messageMentionsBot(ctx.textRaw, ctx.msg, ctx.cfg));
+
     // 0) Log the incoming message to history (in memory) — EXCEPT for technical (TECH) commands.
     // TECH-command replies aren't stored (skipHistory), so the call itself doesn't need logging either:
     // otherwise the history accumulates "dangling" user utterances with no reply (/config, /help, /admin, …),
@@ -63,7 +71,7 @@ export async function handleTelegramMessage(msg: TgMessage, env: Env, isEdit: bo
     // If the command arrived with its own visual (photo/sticker) — mark that in the log.
     const ownVisual = ctx.hasVisual && !ctx.photoFromReply;
     const logged = ownVisual ? `[${visualLabel(ctx)}] ${ctx.textRaw}`.trim() : ctx.textRaw;
-    if (!TECH_COMMANDS.has(mode.type)) {
+    if (!TECH_COMMANDS.has(mode.type) && !unknownCmdAddressed) {
       await appendHistory(ctx, [buildUserItem(msg, logged, chatAliases(ctx))]);
     }
 
@@ -73,6 +81,12 @@ export async function handleTelegramMessage(msg: TgMessage, env: Env, isEdit: bo
     // 1) Quick replies → 2) Commands → 3) Regular chat
     if (!ctx.chatData.paused && ctx.cfg.random && await tryQuickReply(ctx)) return;
     if (await tryCommand(mode, ctx)) return;
+    // Unknown but addressed `/command` → a short hint (with the command list pointer), not an LLM turn.
+    // After the pause gate, so a paused chat stays quiet; after quick-replies/commands, so a real match wins.
+    if (unknownCmdAddressed) {
+      await sendAndStore(ctx, t(ctx.cfg.lang, "cmd_unknown", "/" + unknownCmd), { skipHistory: true });
+      return;
+    }
     await handleChatMessage(ctx);
   } finally {
     // The only state write for the entire update (history is written write-through separately).

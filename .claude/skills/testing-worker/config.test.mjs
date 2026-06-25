@@ -6,6 +6,7 @@ const {
   dedupeHistory, collapseConsecutiveDuplicates, trimHistoryByChars, historyChars,
   appendHistory, updateHistoryMessage,
   getGlobalConfig, mergeConfig, parseConfigValue, setConfigParam, buildConfigHelp,
+  buildConfigGroupHelp, findConfigGroup,
   buildHelp, buildInfoStatus, CONFIG_SCHEMA, CONFIG_GROUPS,
   parseCommandAndArg, isCommand, stripBotMentions, parseRoots, escapeRegExp, lastToken,
   pickOne, newReqId, messageMentionsBot, resolveUserName, pickTargetName, pickRandomUserText,
@@ -147,6 +148,37 @@ describe("max_tokens (response-length limit)", () => {
     const out = buildConfigHelp(getGlobalConfig(makeEnv()), {});
     assert.ok(out.includes("max_tokens"));
     assert.ok(out.includes("4000"));
+  });
+});
+
+
+describe("/config <group> (single section)", () => {
+  test("findConfigGroup matches by cfg_group_* suffix and by localized label", () => {
+    assert.equal(findConfigGroup("ru", "rag"), "cfg_group_rag");   // suffix
+    assert.equal(findConfigGroup("en", "RAG"), "cfg_group_rag");   // case-insensitive
+    assert.equal(findConfigGroup("ru", "nope"), null);
+    assert.equal(findConfigGroup("ru", ""), null);
+  });
+
+  test("buildConfigGroupHelp renders only that section's keys + a hint", () => {
+    const out = buildConfigGroupHelp(getGlobalConfig(makeEnv()), {}, "cfg_group_rag");
+    assert.ok(out.includes("rag_top_k"));    // a key from the rag group
+    assert.ok(out.includes("rag_min_score"));
+    assert.ok(!out.includes("answer_prob")); // a key from a DIFFERENT group is absent
+    assert.ok(out.includes("/config"));      // the change/all-sections hint
+  });
+
+  test("COMMANDS.config: `/config rag` (no value) → the rag section, no value is set", async () => {
+    const ctx = makeCtxFor(makeMsg({ chatType: "private", text: "/config rag" }), makeEnv());
+    const out = await COMMANDS.config(ctx, { type: "config", argText: "rag" });
+    assert.ok(out.includes("rag_top_k"));
+    assert.equal(ctx.chatData.config.rag, undefined); // not toggled
+  });
+
+  test("COMMANDS.config: `/config rag on` (with value) still sets the key", async () => {
+    const ctx = makeCtxFor(makeMsg({ chatType: "private", text: "/config rag on" }), makeEnv());
+    await COMMANDS.config(ctx, { type: "config", argText: "rag on" });
+    assert.equal(ctx.chatData.config.rag, true);
   });
 });
 

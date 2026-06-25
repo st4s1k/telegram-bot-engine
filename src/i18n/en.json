@@ -43,6 +43,7 @@
   ],
   "mem_extract_known": "Already known (do NOT repeat or duplicate this):",
 
+  "cmd_unknown": "🤷 I don't know the command `{0}`.\nType `/help` for the list of commands.",
   "cmd_stop": "😴 Okay, going quiet. (Use /resume to wake me)",
   "cmd_resume": "😎 Back. I'm with you again.",
   "rp_reset": "🎭 Role reset.",
@@ -141,6 +142,7 @@
   "cfg_preset_notfound": "⚠️ No preset `{0}`. Available: {1}.",
   "cfg_preset_applied": "✅ Preset «{0}» applied ({1}).\nView: `/config`",
   "cfg_unknown_key": "⚠️ Error: parameter `{0}` not found.\nType `/config` for the list.",
+  "cfg_group_hint": "_To change a value: `/config <param> <value>`. All sections: `/config`._",
 
   "cfg_set_notfound": "⚠️ Error: parameter `{0}` not found.",
   "cfg_set_error": "⚠️ Error: {0} (for `{1}`).",

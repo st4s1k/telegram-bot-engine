@@ -326,34 +326,60 @@ export function buildConfigHelp(cfg: BotConfig, chatConf: ChatConfig): string {
   msg += "\n" + t(lang, "cfg_help_current") + "\n\n";
 
   for (const [gName, keys] of Object.entries(CONFIG_GROUPS)) {
-    msg += `*${t(lang, gName)}*\n`;
-    for (const key of keys) {
-      const meta = CONFIG_SCHEMA[key];
-      if (!meta) continue; // personaless: a group may reference a key from a missing pack
-      const val = cfg[key];
-      const isCustom = chatConf[key] !== undefined;
-
-      let displayVal = val;
-      let icon = "🔹";
-
-      if (meta.type === "bool") {
-        displayVal = t(lang, val ? "cfg_on" : "cfg_off");
-        icon = val ? "✅" : "❌";
-      } else if (meta.type === "float") {
-        displayVal = `${(val * 100).toFixed(0)}%`;
-        icon = "📈";
-      } else if (meta.type === "int") {
-        displayVal = String(val);
-        icon = "🔢";
-      } else if (meta.type === "string") {
-        // For the model: if not set in the chat — show the active one (from env).
-        displayVal = val || (key === "model" ? cfg.openrouterModel : "—");
-        icon = "🧠";
-      }
-
-      msg += `\`${key}\`: ${icon} **${displayVal}** ${isCustom ? "✏️" : ""} — _${t(lang, meta.desc)}_\n`;
-    }
-    msg += "\n";
+    msg += renderConfigSection(lang, cfg, chatConf, gName, keys) + "\n";
   }
   return msg;
+}
+
+// One config section: a *Group* header + a line per key (icon, current value, ✏️ if overridden, desc).
+// Shared by buildConfigHelp (all groups) and buildConfigGroupHelp (/config <group> — a single section).
+function renderConfigSection(lang: string, cfg: BotConfig, chatConf: ChatConfig, gName: string, keys: string[]): string {
+  let msg = `*${t(lang, gName)}*\n`;
+  for (const key of keys) {
+    const meta = CONFIG_SCHEMA[key];
+    if (!meta) continue; // personaless: a group may reference a key from a missing pack
+    const val = cfg[key];
+    const isCustom = chatConf[key] !== undefined;
+
+    let displayVal = val;
+    let icon = "🔹";
+
+    if (meta.type === "bool") {
+      displayVal = t(lang, val ? "cfg_on" : "cfg_off");
+      icon = val ? "✅" : "❌";
+    } else if (meta.type === "float") {
+      displayVal = `${(val * 100).toFixed(0)}%`;
+      icon = "📈";
+    } else if (meta.type === "int") {
+      displayVal = String(val);
+      icon = "🔢";
+    } else if (meta.type === "string") {
+      // For the model: if not set in the chat — show the active one (from env).
+      displayVal = val || (key === "model" ? cfg.openrouterModel : "—");
+      icon = "🧠";
+    }
+
+    msg += `\`${key}\`: ${icon} **${displayVal}** ${isCustom ? "✏️" : ""} — _${t(lang, meta.desc)}_\n`;
+  }
+  return msg;
+}
+
+// Resolve a user-typed group name to its CONFIG_GROUPS key. Matches the localized label (e.g. "vision")
+// or the `cfg_group_<suffix>` suffix (e.g. "rag"). Persona groups keyed by a literal label match via both
+// branches (t() returns the literal, and the suffix-strip is a no-op). Returns null if nothing matches.
+export function findConfigGroup(lang: string, arg: string): string | null {
+  const a = arg.trim().toLowerCase();
+  if (!a) return null;
+  for (const gName of Object.keys(CONFIG_GROUPS)) {
+    const suffix = gName.replace(/^cfg_group_/, "").toLowerCase();
+    if (a === suffix || a === t(lang, gName).toLowerCase()) return gName;
+  }
+  return null;
+}
+
+// /config <group> — render just one section + a hint on how to change a value / see all sections.
+export function buildConfigGroupHelp(cfg: BotConfig, chatConf: ChatConfig, gName: string): string {
+  const lang = cfg.lang;
+  return renderConfigSection(lang, cfg, chatConf, gName, CONFIG_GROUPS[gName] || [])
+    + "\n" + t(lang, "cfg_group_hint");
 }

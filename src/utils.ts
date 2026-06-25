@@ -104,6 +104,18 @@ export function parseCommandAndArg(text: string, cfg: BotConfig): CommandMode {
   return { type: "llm", argText: "" };
 }
 
+// A message shaped like a Telegram bot command (`/name` or `/name@bot`) that NO registered command
+// matched. Returns the bare command name (lowercase, no slash, no @bot suffix) when the command is for
+// US (or targets no specific bot); returns null for plain text or a `/cmd@otherbot` meant for another bot.
+// Telegram's own command grammar is ASCII `/[a-zA-Z0-9_]{1,32}`, so a cyrillic "/привет" is treated as text.
+export function unknownCommandName(text: string, cfg: BotConfig): string | null {
+  const m = String(text || "").trim().match(/^\/([a-z0-9_]{1,32})(?:@([a-z0-9_]+))?(?:\s|$)/i);
+  if (!m) return null;
+  const target = (m[2] || "").toLowerCase();
+  if (target && target !== cfg.botUsername.toLowerCase()) return null; // addressed to another bot — not ours
+  return m[1].toLowerCase();
+}
+
 export function stripBotMentions(s: string, cfg: BotConfig): string {
   return s
     .replace(new RegExp(`@${escapeRegExp(cfg.botUsername)}\\b`, "gi"), "")
