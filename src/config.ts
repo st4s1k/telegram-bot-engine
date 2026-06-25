@@ -120,6 +120,9 @@ export function getGlobalConfig(env: Env): BotConfig {
     // IANA timezone for history timestamps and the daily-summary cron gate. Default UTC. Deployment-wide
     // (env only, not per-chat): the cron schedule in wrangler.jsonc is chosen to align with this TZ + the 08:00 gate.
     timezone: String(env.BOT_TZ || "UTC").trim() || "UTC",
+    // Deployment-wide data retention (privacy / right-to-be-forgotten by time). >0 → the daily cron purges
+    // history + facts older than N days across all chats. 0/invalid → keep forever (default). Floored to int.
+    retentionDays: Math.max(0, Math.floor(num(env.RETENTION_DAYS, 0))),
 
     // Defaults for Configurable keys
     random: true,

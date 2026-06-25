@@ -17,6 +17,7 @@
     "BOT_USERNAME": "<your_bot>",            // without @ — used to strip @mentions and match /cmd@bot
     "BOT_LANG": "en",                        // engine UI language (any discovered locale); per-chat via /config lang
     "BOT_TZ": "UTC",                         // IANA tz for timestamps + the daily-summary cron gate (see crons)
+    "RETENTION_DAYS": "0",                   // 0 = keep forever; >0 → daily cron purges history+facts older than N days
     "ADMIN_USERNAMES": "<your_username>",    // CSV, without @ — access to the hidden /admin
     "ADMIN_USER_IDS": "",                    // CSV of immutable Telegram user ids (preferred over usernames)
     "ADMIN_CHAT_IDS": "",                    // CSV of chat ids that receive critical error alerts (empty → log only)

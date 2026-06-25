@@ -3,9 +3,9 @@
 // per-chat error isolation, and the thin WORKER.scheduled wrapper.
 import {
   test, describe, assert,
-  makeEnv, makeMsg, seedChat, dbChat, dbHistory, dbMemories,
+  makeEnv, makeMsg, seedChat, seedMemories, dbChat, dbHistory, dbMemories,
   FETCH, sse, CONSOLE,
-  runDailySummaries, WORKER, DEFAULT_CHAT_DATA,
+  runDailySummaries, purgeExpiredData, WORKER, DEFAULT_CHAT_DATA,
 } from "./harness.mjs";
 
 // Time moments (UTC) that yield 08:00 in Chisinau in both DST phases, plus a control "not 8".
@@ -156,5 +156,51 @@ describe("CRON · once-a-day fact curation", () => {
     const row = await dbChat(env, 303);
     assert.ok(Number(row.mem_upto_id) > 0); // curation was already saved BEFORE the summary failed
     assert.ok(CONSOLE.error.some(s => s.includes("runDailySummaries[chat]")));
+  });
+});
+
+
+describe("CRON · retention (RETENTION_DAYS)", () => {
+  const OLD = Date.UTC(2026, 0, 1, 0, 0);  // Jan 1 — far past
+  const NEW = Date.UTC(2026, 6, 15, 0, 0); // Jul 15 — recent
+
+  // Two messages + two facts in chat 700, one OLD one NEW each; both facts also have a vector.
+  async function seedAged(env) {
+    for (const [mid, ts, txt] of [[11, OLD, "old msg"], [12, NEW, "new msg"]]) {
+      await env.DB.prepare("INSERT INTO messages (chat_id, role, content, meta, message_id, created_at) VALUES (?,?,?,?,?,?)")
+        .bind("700", "user", txt, null, mid, ts).run();
+    }
+    for (const [id, ts, txt] of [[1, OLD, "old fact"], [2, NEW, "new fact"]]) {
+      await env.DB.prepare("INSERT INTO memories (id, chat_id, text, source, created_at) VALUES (?,?,?,?,?)")
+        .bind(id, "700", txt, "auto", ts).run();
+    }
+    seedMemories(env, 700, [{ mem_id: 1, text: "old fact" }, { mem_id: 2, text: "new fact" }]);
+  }
+
+  test("purgeExpiredData: drops history + facts (row + vector) older than the cutoff, keeps recent", async () => {
+    const env = makeEnv();
+    await seedAged(env);
+    const res = await purgeExpiredData(env, Date.UTC(2026, 3, 1, 0, 0)); // cutoff between OLD and NEW
+    assert.deepEqual(res, { messages: 1, memories: 1 });
+    assert.deepEqual((await dbHistory(env, 700)).map(m => m.content), ["new msg"]);
+    assert.deepEqual((await dbMemories(env, 700)).map(m => m.text), ["new fact"]);
+    assert.ok(!env._vec.store.has("m700:1")); // old fact's vector deleted
+    assert.ok(env._vec.store.has("m700:2"));  // recent fact's vector kept
+  });
+
+  test("the daily cron purges expired data when RETENTION_DAYS is set", async () => {
+    const env = makeEnv({ BOT_TZ: "Europe/Chisinau", RETENTION_DAYS: "30" });
+    await seedAged(env);
+    await runDailySummaries(env, SUMMER_8); // fires (08:00 Chisinau); cutoff = SUMMER_8 − 30d ≈ Jun 15
+    assert.deepEqual((await dbHistory(env, 700)).map(m => m.content), ["new msg"]);
+    assert.deepEqual((await dbMemories(env, 700)).map(m => m.text), ["new fact"]);
+  });
+
+  test("RETENTION_DAYS unset (0) → nothing is purged", async () => {
+    const env = makeEnv({ BOT_TZ: "Europe/Chisinau" });
+    await seedAged(env);
+    await runDailySummaries(env, SUMMER_8);
+    assert.equal((await dbHistory(env, 700)).length, 2);  // both kept
+    assert.equal((await dbMemories(env, 700)).length, 2);
   });
 });

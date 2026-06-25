@@ -39,6 +39,7 @@ export interface Env {
   VISION_HD_WORDS?: string;
   BOT_LANG?: string; // default language of the engine's UI strings (ru/en); defaults to ru
   BOT_TZ?: string;   // IANA timezone for history timestamps + the daily-summary cron gate; defaults to UTC
+  RETENTION_DAYS?: string; // deployment-wide data retention: history+facts older than N days are purged by the daily cron; 0/unset = keep forever
   // The persona pack reads ITS OWN env variables (switches/probabilities) via a cast of env —
   // the engine neither types nor names them.
 }
@@ -226,6 +227,7 @@ export interface BotConfig {
   llmLog: boolean;
   lang: string; // language of the engine's UI strings (ru/en); the persona localizes its own texts separately
   timezone: string; // IANA timezone (env BOT_TZ, default UTC) for history timestamps + the daily-summary cron gate
+  retentionDays: number; // deployment-wide retention window in days (env RETENTION_DAYS); 0 = keep forever
   random: boolean;
   answer_prob: number;
   // Persona switches and probabilities (*_prob) are provided by the persona pack (getGlobalConfig mixes in

@@ -91,6 +91,17 @@ export async function deleteChatMemoryVectors(ctx: Ctx, memIds: number[]): Promi
   await ragDeleteIds(ctx, memIds.map(id => memVectorId(ctx.chatId, id)));
 }
 
+// Env-based vector delete (no Ctx) — for the deployment-wide retention sweep, which spans chats and has
+// no single request ctx. Same best-effort semantics as ragDeleteIds; tolerates already-absent ids.
+export async function ragDeleteIdsEnv(env: Env, vectorIds: string[]): Promise<void> {
+  if (!env.VECTORIZE || !vectorIds.length) return;
+  try {
+    await env.VECTORIZE.deleteByIds(vectorIds);
+  } catch (e: any) {
+    console.warn("rag.ragDeleteIdsEnv failed", { err: e?.message || e });
+  }
+}
+
 interface MemMeta { mem_id?: number; text?: string; source?: string }
 
 // Recall FACTS relevant to the query's meaning → ready-made strings for the prompt. Under cfg.rag.

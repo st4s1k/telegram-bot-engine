@@ -6,7 +6,7 @@ import {
   makeCtx, shouldAnswer, parseCommandAndArg, chatTitleFromMsg, buildUserItem, visualLabel,
   lastToken, pickOne, getReplyText, tzParts, chatAliases, messageMentionsBot, unknownCommandName,
 } from "./utils";
-import { getChatData, flushChatData, updateHistoryMessage, appendHistory, parseJson } from "./storage";
+import { getChatData, flushChatData, updateHistoryMessage, appendHistory, parseJson, purgeExpiredData } from "./storage";
 import { getGlobalConfig, mergeConfig } from "./config";
 import { sendAndStore, sendTyping, reportError } from "./telegram";
 import { runLLMWithHistory } from "./llm";
@@ -183,6 +183,21 @@ export async function handleChatMessage(ctx: Ctx): Promise<void> {
 export async function runDailySummaries(env: Env, scheduledTimeMs: number): Promise<void> {
   const globalCfg = getGlobalConfig(env);
   if (tzParts(scheduledTimeMs, globalCfg.timezone).hour !== 8) return; // not 08:00 in the configured TZ — this fire isn't ours
+
+  // Retention sweep (deployment-wide RETENTION_DAYS): purge history + facts older than the window across
+  // ALL chats — once a day, before the per-chat work. Disabled (kept forever) when RETENTION_DAYS is 0/unset.
+  // Non-critical: it's storage hygiene off the request path, so a failure logs without alerting admins.
+  if (globalCfg.retentionDays > 0) {
+    try {
+      const cutoff = scheduledTimeMs - globalCfg.retentionDays * 86400_000;
+      const purged = await purgeExpiredData(env, cutoff);
+      if (purged.messages || purged.memories) {
+        console.log(JSON.stringify({ retention: "purged", days: globalCfg.retentionDays, ...purged }));
+      }
+    } catch (e: any) {
+      await reportError(env, "purgeExpiredData", e);
+    }
+  }
 
   const rows = ((await env.DB.prepare("SELECT chat_id, config FROM chats").all())?.results as any[]) || [];
   for (const row of rows) {

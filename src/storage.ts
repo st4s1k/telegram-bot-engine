@@ -9,7 +9,7 @@
 
 import { PHOTO_CACHE_CAP, HISTORY_HARD_CAP_ITEMS, SUMMARY_BACKLOG_CAP } from "./constants";
 import { photoCacheKey, visualNote, visualLabel } from "./utils";
-import { ragUpsertMemory, deleteChatMemoryVectors } from "./rag";
+import { ragUpsertMemory, deleteChatMemoryVectors, ragDeleteIdsEnv, memVectorId } from "./rag";
 import { getPersonaStateDefaults } from "./persona/registry";
 import type { ChatConfig, ChatData, Ctx, Env, HistoryItem, HistoryMeta, Memory, PersonaState, TgMessage } from "./types";
 
@@ -323,6 +323,25 @@ export async function clearMemories(ctx: Ctx): Promise<void> {
 export async function deleteMemory(ctx: Ctx, memId: number): Promise<void> {
   await ctx.env.DB.prepare("DELETE FROM memories WHERE chat_id=? AND id=?").bind(String(ctx.chatId), memId).run();
   await deleteChatMemoryVectors(ctx, [memId]);
+}
+
+// Deployment-wide RETENTION sweep (env RETENTION_DAYS): delete history AND facts older than cutoffMs
+// across ALL chats — so a configured retention window genuinely expires data (privacy / right-to-be-
+// forgotten by time). Facts go row + Vectorize vector; messages are raw history. Best-effort + idempotent.
+// Per-chat on-demand erasure stays `/memory forget all` (also runnable on any chat via `/admin chat_cmd`).
+// Returns the deleted counts. Summary boundaries (id-based) are unaffected — ids are never reused.
+export async function purgeExpiredData(env: Env, cutoffMs: number): Promise<{ messages: number; memories: number }> {
+  // Facts first: collect (chat_id, id) BEFORE deleting the rows, so we can drop the matching vectors.
+  const memRows = ((await env.DB.prepare("SELECT id, chat_id FROM memories WHERE created_at < ?").bind(cutoffMs).all())?.results as any[]) || [];
+  if (memRows.length) {
+    await ragDeleteIdsEnv(env, memRows.map(r => memVectorId(String(r.chat_id), Number(r.id))));
+    await env.DB.prepare("DELETE FROM memories WHERE created_at < ?").bind(cutoffMs).run();
+  }
+  // Messages: count first (shim-agnostic), then delete.
+  const cnt: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM messages WHERE created_at < ?").bind(cutoffMs).first();
+  const messages = Number(cnt?.n) || 0;
+  if (messages) await env.DB.prepare("DELETE FROM messages WHERE created_at < ?").bind(cutoffMs).run();
+  return { messages, memories: memRows.length };
 }
 
 // Collapses CONSECUTIVE messages with identical content into one (keeps the first).

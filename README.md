@@ -243,8 +243,19 @@ models (`OPENROUTER_MODEL`/`OPENROUTER_VISION_MODEL`/`OPENROUTER_SUMMARY_MODEL`/
 `MAX_HISTORY_CHARS`, `MAX_TOKENS`, `ANSWER_PROB`, `ENABLE_VISION`, `ENABLE_REASONING`, `VISION_DETAIL`,
 `VISION_HD_WORDS`, `ENABLE_RAG`, `RAG_TOP_K`, `RAG_MIN_SCORE`, `BOT_NAME`/`BOT_USERNAME`,
 `BOT_LANG` (UI language, default `en`), `BOT_TZ` (IANA timezone for history timestamps and the
-daily-summary cron gate, default `UTC`), `ADMIN_USERNAMES`, `ADMIN_USER_IDS`, `ADMIN_CHAT_IDS`, `LLM_LOG`.
+daily-summary cron gate, default `UTC`), `RETENTION_DAYS` (data-retention window — see *Data retention*
+below, default `0` = keep forever), `ADMIN_USERNAMES`, `ADMIN_USER_IDS`, `ADMIN_CHAT_IDS`, `LLM_LOG`.
 Persona env (switches/probabilities) is set by the pack.
+
+### Data retention / right to be forgotten
+
+- **Time expiry (deployment-wide):** set `RETENTION_DAYS` > 0 and the daily cron purges, across **all**
+  chats, both raw history (`messages`) and curated facts (`memories` rows + their Vectorize vectors) older
+  than that window. `0`/unset keeps everything forever. Summary boundaries are id-based, so expiry never
+  breaks them. (Implemented in `purgeExpiredData`, run once a day before the per-chat summaries.)
+- **On-demand erasure (per chat):** `/memory forget all` wipes a chat's history, facts (+ vectors), role,
+  persona-state, photo cache and spend. An admin can erase **any** chat remotely with
+  `/admin chat_cmd <id> memory forget all`. This is the right-to-be-forgotten path for a single chat.
 
 ### `/config` keys
 
