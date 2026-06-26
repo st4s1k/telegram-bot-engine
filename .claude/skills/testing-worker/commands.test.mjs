@@ -340,6 +340,28 @@ describe("COMMANDS.summary", () => {
 });
 
 
+describe("COMMANDS.retry", () => {
+  test("re-runs the last user message through the model (no copy-paste, no duplication)", async () => {
+    const cd = { ...DEFAULT_CHAT_DATA(), history: [{ role: "user", content: "как дела", meta: { message_id: 5 } }] };
+    const ctx = makeCtxFor(makeMsg({ chatType: "private", chatId: 555, text: "/retry" }), makeEnv(), cd);
+    FETCH.set("chat", () => sse(["норм"]));
+    const out = await COMMANDS.retry(ctx, { type: "retry", argText: "" });
+    assert.equal(out, null); // the handler sent + stored the reply itself
+    assert.ok(FETCH.sends().some(s => s.body.text.includes("норм")));
+    // the previous message is already the last history item → fed once, not duplicated
+    const userMsgs = FETCH.chatBody().messages.filter(m => m.role === "user");
+    assert.equal(userMsgs.length, 1);
+    assert.ok(userMsgs[0].content.includes("как дела"));
+  });
+
+  test("nothing to retry (no prior message) → retry_nothing, no LLM call", async () => {
+    const ctx = makeCtxFor(makeMsg({ chatType: "private", text: "/retry" }), makeEnv());
+    assert.match(await COMMANDS.retry(ctx, { type: "retry", argText: "" }), /Нечего повторять/);
+    assert.equal(FETCH.of("/chat/completions").length, 0);
+  });
+});
+
+
 describe("audit: memory and model branches", () => {
   test("memory aliases forget (стереть/clear) and dedupe (повторы)", async () => {
     for (const alias of ["стереть", "clear"]) {

@@ -44,6 +44,7 @@
   "mem_extract_known": "Already known (do NOT repeat or duplicate this):",
 
   "cmd_unknown": "🤷 I don't know the command `{0}`.\nType `/help` for the list of commands.",
+  "retry_nothing": "🤷 Nothing to retry — I don't see a recent message of yours.",
 
   "menu_start": "Start / about the bot",
   "menu_help": "Commands & help",
@@ -53,6 +54,7 @@
   "menu_memory": "Manage memory",
   "menu_summary": "Digest of what's new",
   "menu_rp": "Set a role",
+  "menu_retry": "Retry the last request",
   "menu_lang": "Interface language",
   "menu_alias": "Name aliases",
   "menu_stop": "Pause the bot",

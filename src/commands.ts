@@ -12,8 +12,10 @@ import {
   clearChatHistory, dedupeChatHistory, addMemory, listMemories, clearMemories, deleteMemory, parseJson, messageStats,
 } from "./storage";
 import { CONFIG_SCHEMA, CONFIG_PRESETS, getGlobalConfig, mergeConfig, buildHelp, buildConfigHelp, buildConfigGroupHelp, findConfigGroup, buildInfoStatus, setConfigParam } from "./config";
-import { fetchModelPrice, fetchOpenRouterUsage } from "./llm";
+import { fetchModelPrice, fetchOpenRouterUsage, runLLMWithHistory } from "./llm";
 import { sendTyping, sendAndStore, syncBotCommands } from "./telegram";
+import { buildDefaultPrompt } from "./prompts";
+import { ragRetrieveMemories } from "./rag";
 import { runIncrementalSummary } from "./summary";
 import { runMemoryCuration } from "./curation";
 import { getPersona, getPersonaStateDefaults, getAllCommands, setEngineCommands } from "./persona/registry";
@@ -554,6 +556,27 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
     save();
     return t(lang, "alias_set", u, name);
   },
+
+  // /retry — re-run the LAST user message through the model (no copy-paste). Useful after a fallback/timeout
+  // error: that failed reply was never stored (isFallbackMessage keeps it out of history), so the last
+  // history item is still the user's message — we feed it again as a normal default reply. The incoming
+  // "/retry" itself isn't logged (the command is skipHistory), so `lastUser` is the real previous message.
+  // The handler sends + stores the reply itself and returns null (so tryCommand doesn't send a second time).
+  retry: async (ctx) => {
+    const lang = ctx.cfg.lang;
+    const hist = ctx.chatData.history || [];
+    const lastUser = [...hist].reverse().find((m) => m.role === "user");
+    if (!lastUser) return t(lang, "retry_nothing");
+    const text = lastUser.content || "";
+    const memories = (ctx.cfg.rag && text.trim().length >= 4) ? await ragRetrieveMemories(ctx, text) : [];
+    const prompt = buildDefaultPrompt(ctx, memories);
+    // Use the message_id of the message we're re-answering: toLLMMessages then sees it's already the last
+    // history item and won't duplicate it (mirrors the normal path, where the incoming message is logged first).
+    const retryMsg: TgMessage = { ...ctx.msg, message_id: lastUser.meta?.message_id ?? ctx.msg.message_id };
+    const reply = await runLLMWithHistory(ctx.cfg, prompt, hist, text, retryMsg, { ctx });
+    await sendAndStore(ctx, reply); // a fresh fallback stays out of history via isFallbackMessage
+    return null; // already sent
+  },
 };
 
 // The engine's core commands — self-describing plugins (the SAME RegisteredCommand contract as the persona):
@@ -572,6 +595,9 @@ const ENGINE_COMMAND_PLUGINS: RegisteredCommand[] = [
   { type: "memory",  defaultCmd: "/memory",  skipHistory: true, menuDesc: "menu_memory",  handler: ENGINE_COMMANDS.memory },
   { type: "summary", defaultCmd: "/summary", llm: true, skipHistory: true, menuDesc: "menu_summary", handler: ENGINE_COMMANDS.summary },
   { type: "rp",      defaultCmd: "/rp",      skipHistory: true, menuDesc: "menu_rp",      handler: ENGINE_COMMANDS.rp },
+  // /retry shows a "typing" indicator (llm) and is skipHistory so its own invocation isn't logged; the
+  // handler itself sends + stores the regenerated reply, so its return is null (no second send by tryCommand).
+  { type: "retry",   defaultCmd: "/retry",   llm: true, skipHistory: true, menuDesc: "menu_retry", handler: ENGINE_COMMANDS.retry },
   { type: "lang",    defaultCmd: "/lang",    skipHistory: true, menuDesc: "menu_lang",    handler: ENGINE_COMMANDS.lang },
   { type: "alias",   defaultCmd: "/alias",   skipHistory: true, menuDesc: "menu_alias",   handler: ENGINE_COMMANDS.alias },
   { type: "stop",    defaultCmd: "/stop",    skipHistory: true, menuDesc: "menu_stop",    handler: ENGINE_COMMANDS.stop },

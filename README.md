@@ -46,6 +46,7 @@ names are fixed by the engine/pack (there is no env-based renaming).
 | `/memory` `add` / `list` / `del N` / `forget` / `dedupe` / `size_chars N` | Long-term memory + history. |
 | `/lang` `[code]` / — | Show the current UI language + available locales, or switch (unknown code is rejected). |
 | `/alias` `@user Name` / `del @user` / — | Set / remove / list per-chat display-name aliases (`username → name`). |
+| `/retry` | Re-run your last message through the model (e.g. after an LLM timeout/error reply) — no copy-paste. |
 | `/stop` · `/resume` | Pause (commands only) and resume. |
 
 > `/admin` is a **hidden** command (only usernames in `ADMIN_USERNAMES`, private chats only): inspect

@@ -128,6 +128,7 @@ export async function sendTelegramMessage(token: string | undefined, chatId: num
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...baseBody, text: toMarkdownV2(normalized), parse_mode: "MarkdownV2" }),
+      signal: AbortSignal.timeout(GETFILE_TIMEOUT_MS), // don't let a hung send hold the worker open
     });
     const data: any = await res.json().catch(() => null);
     if (data?.ok) return data;
@@ -146,6 +147,7 @@ export async function sendTelegramMessage(token: string | undefined, chatId: num
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...baseBody, text: normalized }),
+      signal: AbortSignal.timeout(GETFILE_TIMEOUT_MS),
     });
     const data: any = await res.json().catch(() => null);
     if (!data?.ok) {
