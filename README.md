@@ -112,8 +112,8 @@ engine never names a specific pack). The per-call persona readers degrade cleanl
 pack (`personaless.test.mjs`).
 
 ```bash
-# locally with a pack:
-PERSONA_PACK=../my-pack npm test       # (+ copy tests/*.persona.test.mjs next to the core tests)
+# locally with a pack (auto-stages the pack's tests/*.persona.test.mjs into tests/):
+PERSONA_PACK=../my-pack npm test
 # without a pack — neutral engine:
 npm test
 ```
@@ -209,18 +209,29 @@ registers them via `setEngineCommands`, and `getAllCommands()` = engine ∪ pers
 
 ## Development
 
+Needs **Node 22.5+** (the test harness uses the built-in `node:sqlite`; CI runs Node 22). `npm test` is the
+real local loop — **offline, no keys, no Cloudflare** — so cloning + `npm test` works in minutes.
+
 ```bash
 npm install
-npm test                          # vitest run — offline, neutral pack (~315 core tests)
-PERSONA_PACK=../my-pack npm test  # with a pack (+ copy its tests/*.persona.test.mjs next to the core tests)
+npm test                          # vitest run — offline, neutral pack (~347 core tests)
+PERSONA_PACK=../my-pack npm test  # with a pack (auto-stages its tests/*.persona.test.mjs into tests/)
 npm run typecheck                 # tsc --noEmit (strict); npm run check is an alias
-npm run dev                       # wrangler dev — local run
+npm run dev                       # wrangler dev — local worker (see note below)
 ```
 
 Tests and the harness live in **`tests/`** (`tests/harness.mjs`), run with `npm test`. A
 new testable core function just needs to be `export`ed from its module — the `index.ts` barrel
 re-exports it automatically. Persona-specific tests (`tests/*.persona.test.mjs`) live in the pack repo and
 are auto-staged into `tests/` when `PERSONA_PACK` is set.
+
+**Running a live bot is a deploy, not `wrangler dev`.** Telegram delivers updates to a **public HTTPS
+webhook**, but `wrangler dev` is localhost-only — pointing Telegram at it needs a tunnel (e.g.
+`cloudflared tunnel` / `ngrok`) and the worker's bindings + secrets. For a real bot, **deploy** instead:
+the demo pack ships a one-command scaffold —
+[`telegram-bot-persona/deployment/`](https://github.com/st4s1k/telegram-bot-persona/tree/main/deployment)
+(`npm run setup`). A live run needs two secrets in `.dev.vars`: `TELEGRAM_BOT_TOKEN` (from @BotFather) and
+`OPENROUTER_API_KEY` (from openrouter.ai).
 
 ## Deployment
 

@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
     "persona": "node scripts/select-persona.mjs",
     "prepare": "node scripts/select-persona.mjs",
