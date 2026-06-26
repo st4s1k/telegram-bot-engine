@@ -6,6 +6,6 @@ import { defineConfig } from "vitest/config";
 // Понадобятся настоящие интеграционные тесты в workerd — заведём отдельный pool-workers проект.
 export default defineConfig({
   test: {
-    include: [".claude/skills/testing-worker/*.test.mjs"],
+    include: ["tests/*.test.mjs"],
   },
 });

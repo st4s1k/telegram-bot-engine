@@ -217,9 +217,10 @@ npm run typecheck                 # tsc --noEmit (strict); npm run check is an a
 npm run dev                       # wrangler dev — local run
 ```
 
-Tests and the harness live in `.claude/skills/testing-worker/` (see the **testing-worker** skill). A
+Tests and the harness live in **`tests/`** (`tests/harness.mjs`), run with `npm test`. A
 new testable core function just needs to be `export`ed from its module — the `index.ts` barrel
-re-exports it automatically. Persona-specific tests (`*.persona.test.mjs`) live in the pack repo.
+re-exports it automatically. Persona-specific tests (`tests/*.persona.test.mjs`) live in the pack repo and
+are auto-staged into `tests/` when `PERSONA_PACK` is set.
 
 ## Deployment
 
@@ -242,9 +243,10 @@ and runs `wrangler deploy` against its own resources/secrets.
 
 A manual `npx wrangler deploy` is an emergency fallback (apply migrations and stage the pack first).
 
-**Scaffold:** [`examples/deployment/`](examples/deployment/) has copy-paste templates — a `wrangler.jsonc`
-(bindings/vars/crons), a `deploy.yml` (clone engine → stage pack → gate → migrate → deploy), a
-`.dev.vars.example` (secrets), and a `setWebhook.mjs` helper — with a step-by-step README.
+**Deploy scaffold lives with the packs** (deployment is a pack-project concern, not the engine's): copy-paste
+templates — `wrangler.jsonc` (bindings/vars/crons), `deploy.yml` (clone engine → stage pack → gate → migrate
+→ deploy), `.dev.vars.example` (secrets), and a `setWebhook.mjs` helper, with a step-by-step README — are in
+the demo pack at [`telegram-bot-persona/deployment/`](https://github.com/st4s1k/telegram-bot-persona/tree/main/deployment).
 
 ## Configuration
 

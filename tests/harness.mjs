@@ -1,5 +1,5 @@
 /**
- * Shared harness for the `*.test.mjs` test files in this folder.
+ * Shared harness for the `*.test.mjs` test files in this folder (`tests/`).
  *
  * Re-exports src/index.ts (the barrel, via `export *`) + Vitest (test/describe/beforeEach) and
  * an assert-shim over `expect`, plus mocks (in-memory KV, a stubbed globalThis.fetch,
@@ -16,7 +16,7 @@
 import { beforeEach, expect } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync, readdirSync } from "node:fs";
-import * as W from "../../../src/index.ts";
+import * as W from "../src/index.ts";
 
 // --- re-export for test files ---
 export { test, describe, beforeEach } from "vitest";
@@ -30,8 +30,8 @@ export const assert = {
   notEqual: (a, b, msg) => expect(a, msg).not.toBe(b),
   throws: (fn, msg) => expect(fn, msg).toThrow(),
 };
-export * from "../../../src/index.ts";
-export { default as WORKER } from "../../../src/index.ts";
+export * from "../src/index.ts";
+export { default as WORKER } from "../src/index.ts";
 // The engine (src/index.ts) is persona-free — the harness does not re-export pack content. Persona-specific
 // tests (which live in the pack repo and are staged alongside) import pack symbols directly from src/persona/_pack/.
 // The engine no longer exports fallback strings as constants — they live in the ACTIVE persona. The
@@ -175,7 +175,7 @@ export function makeKV(initial = {}, { pageSize = Infinity } = {}) {
 // --- D1 (DB) over node:sqlite: a real SQLite engine (the same one D1 uses in prod), shimming the D1Database API. ---
 // Apply ALL migrations in name order (0001, 0002, …) — like `wrangler d1 migrations apply`,
 // so the tests see the same schema as prod (new columns from 0002+, etc.).
-const MIG_DIR = new URL("../../../migrations/", import.meta.url);
+const MIG_DIR = new URL("../migrations/", import.meta.url);
 const D1_MIGRATIONS = readdirSync(MIG_DIR)
   .filter(f => f.endsWith(".sql"))
   .sort()

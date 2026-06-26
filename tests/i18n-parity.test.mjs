@@ -1,6 +1,6 @@
 import * as H from "./harness.mjs";
-import en from "../../../src/i18n/en.json";
-import ru from "../../../src/i18n/ru.json";
+import en from "../src/i18n/en.json";
+import ru from "../src/i18n/ru.json";
 const { test, describe, assert } = H;
 
 // The engine's locale files must stay key-for-key in sync for DISPLAYED strings: a displayed key present in
