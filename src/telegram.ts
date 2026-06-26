@@ -253,6 +253,14 @@ export async function reportError(env: Env, where: string, err: any, opts: { cri
 
 /* ================= NATIVE COMMAND MENU (setMyCommands) ================= */
 
+// Scopes we set the menu for. We set `default` AND the explicit private/group scopes, because in Telegram a
+// SPECIFIC scope (all_private_chats / all_group_chats) OVERRIDES `default`: if those scopes were ever emptied
+// (e.g. their toggles turned off in BotFather), a default-only list would never show. Setting them explicitly
+// makes the "/" menu appear in DMs and groups without anyone touching BotFather. If the list changes, bump
+// MENU_SCOPES_VERSION so the fingerprint changes and the guarded auto-sync re-runs.
+const MENU_SCOPES_VERSION = "scopes:default+private+group";
+const MENU_SCOPES: (undefined | { type: string })[] = [undefined, { type: "all_private_chats" }, { type: "all_group_chats" }];
+
 // The {command, description} list for the native "/" menu in one locale. Only commands carrying a
 // `menuDesc` i18n key are shown (so the hidden /admin is excluded); the description is resolved per locale
 // and clamped to Telegram's 256-char limit. command = defaultCmd minus the leading slash; anything that
@@ -274,40 +282,48 @@ export function buildBotCommands(lang: string): { command: string; description: 
 // once after such a change and stays quiet otherwise.
 export function botCommandsFingerprint(): string {
   const cmds = getAllCommands().filter(c => c.menuDesc).map(c => `${c.defaultCmd}:${c.menuDesc}`).sort();
-  const raw = `${LOCALES.slice().sort().join(",")}|${cmds.join(",")}`;
+  // MENU_SCOPES_VERSION is part of the fingerprint so changing the scope set re-triggers the guarded sync.
+  const raw = `${MENU_SCOPES_VERSION}|${LOCALES.slice().sort().join(",")}|${cmds.join(",")}`;
   let h = 5381;
   for (let i = 0; i < raw.length; i++) h = ((h << 5) + h + raw.charCodeAt(i)) >>> 0; // djb2
   return h.toString(36);
 }
 
-// Push the command menu to Telegram: a default list (no language_code, in BOT_LANG) plus one per discovered
-// 2-letter locale (language_code). Telegram shows the list matching the user's client language, falling back
-// to the default. Idempotent + best-effort — a failed call is logged, never thrown. Returns the success count.
+// Push the command menu to Telegram for each scope above × the default-language list + one per discovered
+// 2-letter locale (language_code). Telegram shows the list matching the user's client language and chat
+// scope, falling back to default. Idempotent + best-effort — a failed call is logged, never thrown.
+// Returns the count of successful API calls.
 export async function syncBotCommands(env: Env): Promise<number> {
   const token = env.TELEGRAM_BOT_TOKEN;
   if (!token) return 0;
   const url = `https://api.telegram.org/bot${token}/setMyCommands`;
-  const call = async (commands: { command: string; description: string }[], language_code?: string): Promise<boolean> => {
+  const call = async (commands: { command: string; description: string }[], scope?: { type: string }, language_code?: string): Promise<boolean> => {
     if (!commands.length) return false;
     try {
+      const body: Record<string, unknown> = { commands };
+      if (scope) body.scope = scope;
+      if (language_code) body.language_code = language_code;
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(language_code ? { commands, language_code } : { commands }),
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(GETFILE_TIMEOUT_MS),
       });
       const data: any = await res.json().catch(() => null);
-      if (!data?.ok) { console.warn("setMyCommands failed", { language_code, description: data?.description }); return false; }
+      if (!data?.ok) { console.warn("setMyCommands failed", { scope: scope?.type, language_code, description: data?.description }); return false; }
       return true;
     } catch (e: any) {
-      console.warn("setMyCommands threw", { language_code, err: e?.message || e });
+      console.warn("setMyCommands threw", { scope: scope?.type, language_code, err: e?.message || e });
       return false;
     }
   };
+  const langs: (undefined | string)[] = [undefined, ...LOCALES.filter(l => /^[a-z]{2}$/.test(l))]; // undefined = default-language list; Telegram wants ISO-639-1 codes
   let ok = 0;
-  if (await call(buildBotCommands(env.BOT_LANG || DEFAULT_LANG))) ok++;   // default (no language_code)
-  for (const lang of LOCALES) {
-    if (/^[a-z]{2}$/.test(lang) && await call(buildBotCommands(lang), lang)) ok++; // Telegram wants ISO-639-1
+  for (const scope of MENU_SCOPES) {
+    for (const lang of langs) {
+      const cmds = buildBotCommands(lang ?? (env.BOT_LANG || DEFAULT_LANG));
+      if (await call(cmds, scope, lang)) ok++;
+    }
   }
   return ok;
 }

@@ -193,13 +193,16 @@ describe("native command menu (setMyCommands)", () => {
     assert.notEqual(en.description, ru.description); // menu_help differs en vs ru
   });
 
-  test("syncBotCommands: a default call + one per discovered locale; counts successes", async () => {
+  test("syncBotCommands: sets default + private + group scopes, each per locale; counts successes", async () => {
     const env = makeEnv();
     const ok = await syncBotCommands(env);
     const calls = FETCH.of("/setMyCommands");
-    // default (no language_code) + one per discovered 2-letter locale (en, ru)
+    // explicit scopes so the menu shows even if a scope was emptied in BotFather
+    assert.ok(calls.some(c => c.body.scope === undefined));                       // default scope
+    assert.ok(calls.some(c => c.body.scope?.type === "all_private_chats"));       // DMs
+    assert.ok(calls.some(c => c.body.scope?.type === "all_group_chats"));         // groups
+    // localized per discovered 2-letter locale
     assert.ok(calls.some(c => c.body.language_code === undefined));
-    assert.ok(calls.some(c => c.body.language_code === "en"));
     assert.ok(calls.some(c => c.body.language_code === "ru"));
     assert.equal(ok, calls.length); // all mocked calls succeed
   });
