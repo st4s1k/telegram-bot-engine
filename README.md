@@ -37,20 +37,29 @@ names are fixed by the engine/pack (there is no env-based renaming).
 
 | Command | What it does |
 |---|---|
+_Most commands with **no argument** show the current state/details — noted as "(bare: …)" below._
+
+| Command | What it does |
+|---|---|
 | `/help` | Command list: the engine renders its base list and **appends** the active pack's help section below it. |
-| `/info` | Chat status: role, active model, history size, number of custom settings. |
+| `/start` | First-contact intro / "about the bot" reply (Telegram auto-sends `/start` on first open). |
+| `/info` | Chat status: role, active model, enabled features (RAG / vision / daily summary), UI language, history size, chat spend, custom-settings count. |
 | `/summary` | Incremental "what's new" LLM digest since the last call (needs a few new messages). In supergroups its `HH:MM` timestamps become tap-to-jump links to the message at that minute. |
-| `/rp` `<description>` / `off` / — | Set / clear / show the chat role. |
-| `/config` `[key value]` / `reset` | Show or change chat settings (see [keys](#config-keys)). |
-| `/model` `[id]` / `vision <id>` / `summary <id>` / `reset` | Model(s), price, balance; switch/reset. |
-| `/memory` `add` / `list` / `del N` / `forget` / `dedupe` / `size_chars N` | Long-term memory + history. |
-| `/lang` `[code]` / — | Show the current UI language + available locales, or switch (unknown code is rejected). |
-| `/alias` `@user Name` / `del @user` / — | Set / remove / list per-chat display-name aliases (`username → name`). |
-| `/retry` | Re-run your last message through the model (e.g. after an LLM timeout/error reply) — no copy-paste. |
+| `/retry` | Re-run your LAST message through the model (e.g. after an LLM timeout/error reply) — no copy-paste; it replays the message exactly (a content command re-runs as that command). |
+| `/rp` `[description]` / `off` | Bare: show the current role; else set / clear it. |
+| `/config` `[key value]` / `<group>` / `reset` / `preset <name>` | Bare: show all current settings; `<group>` (main/vision/thinking/rag/daily/lang): one section; or change a key / reset / apply a preset (see [keys](#config-keys)). |
+| `/model` `[id]` / `vision [id]` / `summary [id]` / `reset` | Bare: current model + price + balance + spend; else switch / reset (the `vision`/`summary` sub-models likewise show current when given no id). |
+| `/memory` `add` / `list` / `del N` / `forget` / `dedupe` / `size_chars N` | Bare: memory status; else manage long-term memory + history. |
+| `/lang` `[code]` | Bare: current UI language + available locales; else switch (unknown code is rejected). |
+| `/alias` `@user Name` / `del @user` | Bare: list per-chat display-name aliases (`username → name`); else set / remove one. |
 | `/stop` · `/resume` | Pause (commands only) and resume. |
 
-> `/admin` is a **hidden** command (only usernames in `ADMIN_USERNAMES`, private chats only): inspect
-> all sessions, statistics, run any command remotely in another chat. It is never advertised.
+> `/admin` is a **hidden** command (usernames in `ADMIN_USERNAMES` **or** ids in `ADMIN_USER_IDS`, private
+> chats only): inspect all sessions, statistics, run any command remotely in another chat, and
+> `/admin commands` to refresh the native command menu. It is never advertised.
+
+> **Unknown command:** an unrecognized `/command` addressed to the bot (a private chat, `/cmd@thisbot`, or
+> an @mention) gets a brief `/help` pointer (`cmd_unknown`) instead of being sent to the LLM.
 
 **Fun commands** (jokes, dice, "mood", etc.) come from the persona pack and are documented in its repo,
 not here.

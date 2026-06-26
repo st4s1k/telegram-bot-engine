@@ -9,7 +9,7 @@ const {
 
 // The persona's localized texts are baked into the engine i18n at BUILD time (the generate step), so a
 // runtime setPersona() swap can't neutralize them. The text-neutrality checks below therefore apply only
-// to a NEUTRAL build (no persona i18n staged) — skip them when a pack is staged (e.g. the fasol suite).
+// to a NEUTRAL build (no persona i18n staged) — skip them when a pack is staged (e.g. a pack's own suite).
 // The pack OBJECT (commands/quick-replies/hooks/wakeWords) IS runtime-swappable, so those checks run always.
 const NEUTRAL_BUILD = !getPersonaTexts("en").defaultVoice;
 

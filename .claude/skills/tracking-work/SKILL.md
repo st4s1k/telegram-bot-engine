@@ -1,6 +1,6 @@
 ---
 name: tracking-work
-description: The standard procedure for any work request on the Фасол bot (Cloudflare Worker, TypeScript in src/) — feature, command, fix, refactor, or tweak. Records the task and its subtasks in WORK.md as a live to-do list, implements it, type-checks + runs the Vitest suite, commits, and pushes to master — which triggers the GitHub Actions CI/CD that applies D1 migrations and deploys. Removes the task from WORK.md once every subtask is done. Use whenever the user asks for a change to this project.
+description: The standard procedure for any work request on this Telegram bot engine (Cloudflare Worker, TypeScript in src/) — feature, command, fix, refactor, or tweak. Records the task and its subtasks in WORK.md as a live to-do list, implements it, type-checks + runs the Vitest suite, commits, and pushes to master — which triggers the GitHub Actions CI/CD that applies D1 migrations and deploys. Removes the task from WORK.md once every subtask is done. Use whenever the user asks for a change to this project.
 ---
 
 # tracking-work

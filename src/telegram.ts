@@ -181,21 +181,27 @@ export async function sendAndStore(ctx: Ctx, content: string, { skipHistory = fa
     return null;
   }
 
+  // On a fallback (LLM error/timeout) append a tappable `/retry` hint so the user can re-run in one tap
+  // (Telegram makes the registered /retry command clickable). The hint goes only to the sent text — NOT to
+  // history (a fallback is never stored anyway). `isFb` is computed once and reused for the history gate.
+  const isFb = isFallbackMessage(clean);
+  const outText = isFb ? `${clean}\n\n${t(ctx.cfg.lang, "retry_hint")}` : clean;
+
   // Split by the Telegram limit. The common single-chunk reply — without extra allocation/copy.
   // We cut on UTF-16 code units (the same way Telegram measures the limit), but we don't break a
   // surrogate pair — otherwise the boundary yields "lone" surrogates and the emoji turns into U+FFFD.
   const parts: string[] = [];
-  if (clean.length <= TELEGRAM_MSG_LIMIT) {
-    parts.push(clean);
+  if (outText.length <= TELEGRAM_MSG_LIMIT) {
+    parts.push(outText);
   } else {
     let i = 0;
-    while (i < clean.length) {
-      let end = Math.min(i + TELEGRAM_MSG_LIMIT, clean.length);
-      if (end < clean.length) {
-        const c = clean.charCodeAt(end - 1);
+    while (i < outText.length) {
+      let end = Math.min(i + TELEGRAM_MSG_LIMIT, outText.length);
+      if (end < outText.length) {
+        const c = outText.charCodeAt(end - 1);
         if (c >= 0xD800 && c <= 0xDBFF) end--; // the boundary landed on a high surrogate → its pair moves to the next chunk
       }
-      parts.push(clean.slice(i, end));
+      parts.push(outText.slice(i, end));
       i = end;
     }
   }
@@ -207,7 +213,8 @@ export async function sendAndStore(ctx: Ctx, content: string, { skipHistory = fa
   // fallback errors — otherwise the model later "picks them up" as its own utterance. Also skip when the
   // send FAILED (lastSent has no result.message_id: both MarkdownV2 and plain attempts errored / non-ok) —
   // recording a reply the user never received would leave a phantom turn the model then "remembers" saying.
-  if (!skipHistory && !isFallbackMessage(clean) && lastSent?.result?.message_id) {
+  // History stores `clean` (never the /retry hint).
+  if (!skipHistory && !isFb && lastSent?.result?.message_id) {
     await appendHistory(ctx, [buildAssistantItem(clean, ctx.cfg, ctx.replyTargetId, lastSent)]);
   }
   return lastSent;

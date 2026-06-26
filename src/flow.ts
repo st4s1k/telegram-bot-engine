@@ -55,6 +55,13 @@ export async function handleTelegramMessage(msg: TgMessage, env: Env, isEdit: bo
       return;
     }
 
+    // /retry: re-run the user's LAST message (see handleRetry). Handled before the normal dispatch so the
+    // re-run drives the full flow on the SAME ctx; the `/retry` call itself isn't logged (skipHistory).
+    if (mode.type === "retry") {
+      await handleRetry(ctx);
+      return;
+    }
+
     // An unknown `/command` addressed to us (private chat, `/cmd@ourbot`, or an @mention/wakeword) — we'll
     // reply with a hint instead of feeding "/foobar" to the LLM. Computed here so we also skip logging it
     // to history (like a tech command) — its hint reply isn't stored either, so no dangling user line.
@@ -100,6 +107,32 @@ export async function handleTelegramMessage(msg: TgMessage, env: Env, isEdit: bo
       }
     }
   }
+}
+
+// /retry — re-run the user's LAST message through the NORMAL flow, on the SAME ctx/chatData (so storage is
+// native and the caller's single flush persists it — no second getChatData/flush, no double-counting). The
+// last real user message is still in history (a failed/fallback reply is never stored; /retry itself is
+// skipHistory), so we replay it: a content command (e.g. /anek) re-runs as that command and its reply is
+// stored just like the first time; a normal message gets a fresh reply stored as chat; a technical command
+// reply stays unstored. message_id of the original → appendHistory dedups the re-logged incoming. Nothing to
+// replay (or it would recurse into /retry) → a short, unstored notice.
+async function handleRetry(ctx: Ctx): Promise<void> {
+  const lang = ctx.cfg.lang;
+  const lastUser = [...(ctx.chatData.history || [])].reverse().find((m) => m.role === "user");
+  const rmode = lastUser ? parseCommandAndArg(lastUser.content, ctx.cfg) : null;
+  if (!lastUser || !rmode || rmode.type === "retry") {
+    await sendAndStore(ctx, t(lang, "retry_nothing"), { skipHistory: true });
+    return;
+  }
+  const rmsg: TgMessage = { ...ctx.msg, text: lastUser.content, message_id: lastUser.meta?.message_id ?? ctx.msg.message_id };
+  const rctx = makeCtx(rmsg, ctx.env, ctx.cfg, ctx.chatData); // SAME chatData object → one flush by the caller
+  // Replay the dispatch (mirrors handleTelegramMessage): log the incoming unless TECH (deduped by
+  // message_id), honor pause, quick replies, then command or chat.
+  if (!TECH_COMMANDS.has(rmode.type)) await appendHistory(rctx, [buildUserItem(rmsg, lastUser.content, chatAliases(rctx))]);
+  if (rctx.chatData.paused && !isCommand(rmode.type)) return;
+  if (!rctx.chatData.paused && rctx.cfg.random && await tryQuickReply(rctx)) return;
+  if (await tryCommand(rmode, rctx)) return;
+  await handleChatMessage(rctx);
 }
 
 /* ================= QUICK REPLIES ================= */

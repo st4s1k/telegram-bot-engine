@@ -1,6 +1,6 @@
 ---
 name: testing-worker
-description: Runs and extends the Vitest suite for the Фасол Telegram-bot Cloudflare Worker (src/). Use when changing the worker, adding or fixing a command/feature/bug, or before deploying — to run the tests, read failures, and add coverage for new behavior. Knows the mock-KV / mock-fetch / SSE harness, the assert-shim, and the test-export contract the worker exposes for unit tests.
+description: Runs and extends the Vitest suite for this Telegram-bot Cloudflare Worker engine (src/). Use when changing the worker, adding or fixing a command/feature/bug, or before deploying — to run the tests, read failures, and add coverage for new behavior. Knows the mock-KV / mock-fetch / SSE harness, the assert-shim, and the test-export contract the worker exposes for unit tests.
 ---
 
 # testing-worker
@@ -32,15 +32,14 @@ npm run check     # tsc --noEmit (alias of typecheck)
 
 ### Gate = three persona builds
 
-The engine is persona-free, so the gate runs the suite **three times** — once neutral and once per pack — and all three must be green + typecheck-clean before a deploy:
+The engine is persona-free, so the gate runs the suite **once neutral plus once per pack you ship** — all must be green + typecheck-clean before a deploy:
 
 ```
 # 1) neutral (personaless engine)
-unset PERSONA_PACK;            npm run typecheck && npm test
-# 2) the «Фасол» pack
-PERSONA_PACK=../fasoliz-bot-persona  npm run typecheck && npm test
-# 3) the demo pack
-PERSONA_PACK=../telegram-bot-persona npm run typecheck && npm test
+unset PERSONA_PACK;                   npm run typecheck && npm test
+# 2) each pack — point PERSONA_PACK at its dir (the demo pack ships in this org):
+PERSONA_PACK=../telegram-bot-persona  npm run typecheck && npm test
+# repeat for any other pack: PERSONA_PACK=../<your-pack>  npm run typecheck && npm test
 ```
 
 `pretest`/`pretypecheck` run `scripts/select-persona.mjs`, which (a) stages the pack's `*.ts` + `i18n/` into `src/persona/_pack/`, (b) regenerates the i18n manifest, and (c) **auto-stages the pack's tests**: it copies `<PERSONA_PACK>/tests/*.persona.test.mjs` into this folder and clears any previously-staged pack tests first. So you do **not** copy pack tests by hand — just set `PERSONA_PACK` and run. Staged pack tests are gitignored (the `*.persona.test.mjs` glob) and removed again on the neutral run, so a leftover never pollutes another build. A pack test must therefore be named `*.persona.test.mjs` and import its surface from `./harness.mjs` (the engine harness it's staged next to).

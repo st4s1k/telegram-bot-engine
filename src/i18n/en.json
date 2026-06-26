@@ -45,6 +45,7 @@
 
   "cmd_unknown": "🤷 I don't know the command `{0}`.\nType `/help` for the list of commands.",
   "retry_nothing": "🤷 Nothing to retry — I don't see a recent message of yours.",
+  "retry_hint": "↻ Tap to retry: /retry",
 
   "menu_start": "Start / about the bot",
   "menu_help": "Commands & help",
@@ -276,17 +277,20 @@
 
   "help_engine": [
     "🤖 **Commands**",
+    "_Tip: most commands with no argument show the current state / details._",
     "",
     "*⚙️ Core*",
     "`/help` — this message",
-    "`/info` — chat status (role, model, history size)",
-    "`/lang` `[code]` — switch the UI language (or list available)",
-    "`/config` `[key value]` · `reset` · `preset <name>` — chat settings",
-    "`/model` `[id]` · `vision <id>` · `summary <id>` · `reset` — model, price, balance",
-    "`/memory` `add` · `list` · `del N` · `forget` · `dedupe` · `size_chars N` — long-term memory",
+    "`/start` — intro / about the bot",
+    "`/info` — chat status (role, model, features, history, spend)",
+    "`/config` — no arg: all settings · `<group>` · `<key> <value>` · `reset` · `preset <name>`",
+    "`/model` — no arg: model + price + balance · `<id>` · `vision [id]` · `summary [id]` · `reset`",
+    "`/memory` — no arg: status · `add` · `list` · `del N` · `forget` · `dedupe` · `size_chars N`",
     "`/summary` — incremental \"what's new\" digest",
-    "`/rp` `<role>` · `off` — set / clear the chat role",
-    "`/alias` `@user Name` · `del @user` — per-chat display-name aliases",
+    "`/retry` — re-run your last message (e.g. after a timeout / error)",
+    "`/rp` `[role]` · `off` — no arg: show the role; else set / clear it",
+    "`/lang` `[code]` — no arg: current + available; else switch",
+    "`/alias` — no arg: list · `@user Name` · `del @user` — per-chat name aliases",
     "`/stop` · `/resume` — pause / unpause"
   ],
 

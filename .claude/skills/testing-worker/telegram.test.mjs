@@ -113,6 +113,13 @@ describe("sendAndStore", () => {
     assert.equal(ctx.chatData.history.length, 0);
   });
 
+  test("a fallback gets a tappable /retry hint appended to the sent text (but not to history)", async () => {
+    const ctx = makeCtxFor(makeMsg(), makeEnv());
+    await sendAndStore(ctx, FALLBACK_LLM_ERROR);
+    assert.ok(FETCH.sends()[0].body.text.includes("/retry")); // hint appended for one-tap re-run
+    assert.equal(ctx.chatData.history.length, 0);              // still nothing stored
+  });
+
   test("a failed send is NOT stored in history (no phantom turn)", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     FETCH.set("send", () => H.jsonResp({ ok: false, description: "bot was blocked by the user" }));
