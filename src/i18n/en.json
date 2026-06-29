@@ -25,7 +25,7 @@
   ],
   "prompt_photo_cache": "In the photo (by description): \"{0}\". Reply to / comment on this photo in your style.",
   "prompt_summary": [
-    "Make a SHORT summary of the NEW messages in this chat (what's new): main topics, who said what, key takeaways — concise and to the point.",
+    "Make a SHORT summary of the NEW messages in this chat (what's new). Group it by TOPIC of discussion, NOT by participant: each bullet is one topic, and within it briefly note who said or suggested what. Main topics, key takeaways — concise and to the point.",
     "No preambles like \"here's the summary\" — get straight to it. Don't make up anything that wasn't in the messages."
   ],
   "prompt_summary_prev": [
