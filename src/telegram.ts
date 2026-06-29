@@ -25,6 +25,25 @@ export function toMarkdownV2(text: string): string {
   const escCode = (s: string): string => s.replace(/[`\\]/g, "\\$&");        // inside code
   const escLinkUrl = (s: string): string => s.replace(/[)\\]/g, "\\$&");     // inside link url
 
+  // Inside a STYLED span (*bold*/_italic_/~strike~/||spoiler||) we still escape plain text, but we must
+  // PRESERVE a nested `[text](url)` link — Telegram allows a text_link inside those entities (e.g. a /summary
+  // header `*…[17:04](deep-link)…*`), and escaping its brackets would render the link as raw `[17:04](url)`.
+  // Only links are preserved (code/pre may NOT nest inside bold per Telegram, so backticks stay escaped, and
+  // we don't reopen markers — so stray `*_~|` inside the span keep escaping exactly as before).
+  const escInline = (s: string): string => {
+    let r = "";
+    let j = 0;
+    while (j < s.length) {
+      if (s[j] === "[") {
+        const m = s.slice(j).match(/^\[([^\]\n]+)\]\(([^)\n]+)\)/);
+        if (m) { r += "[" + escPlain(m[1]) + "](" + escLinkUrl(m[2]) + ")"; j += m[0].length; continue; }
+      }
+      r += escPlain(s[j]);
+      j++;
+    }
+    return r;
+  };
+
   while (i < src.length) {
     const ch = src[i];
     const rest = src.slice(i);
@@ -44,7 +63,7 @@ export function toMarkdownV2(text: string): string {
       const end = src.indexOf("||", i + 2);
       const inner = end > i ? src.slice(i + 2, end) : "";
       if (end > i && inner.length > 0 && !inner.includes("\n")) {
-        out += "||" + escPlain(inner) + "||";
+        out += "||" + escInline(inner) + "||";
         i = end + 2;
         continue;
       }
@@ -75,7 +94,7 @@ export function toMarkdownV2(text: string): string {
       const end = src.indexOf(ch, i + 1);
       const inner = end > i ? src.slice(i + 1, end) : "";
       if (end > i && inner.length > 0 && !inner.includes("\n")) {
-        out += ch + escPlain(inner) + ch;
+        out += ch + escInline(inner) + ch;
         i = end + 1;
         continue;
       }

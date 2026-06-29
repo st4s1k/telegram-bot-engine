@@ -219,6 +219,25 @@ describe("toMarkdownV2", () => {
     assert.equal(toMarkdownV2("[a.b](http://x/y)"), "[a\\.b](http://x/y)");
   });
 
+  test("a nested link inside a styled span is PRESERVED (not rendered raw)", () => {
+    // The /summary header is bold and linkifySummaryTimes injects time deep-links INTO it; the link must
+    // survive (Telegram allows a text_link inside bold). Regression: previously the brackets got escaped
+    // and Telegram showed a literal `[17:04](url)`.
+    assert.equal(
+      toMarkdownV2("*[17:04](https://t.me/c/1/2)*"),
+      "*[17:04](https://t.me/c/1/2)*"
+    );
+    // surrounding plain text inside the bold is still escaped; the link stays intact
+    assert.equal(
+      toMarkdownV2("*Новое (a.b [10:25](http://x/y) c)*"),
+      "*Новое \\(a\\.b [10:25](http://x/y) c\\)*"
+    );
+    // same for a spoiler span
+    assert.equal(toMarkdownV2("||[t](http://x/y)||"), "||[t](http://x/y)||");
+    // a stray marker / backtick inside the span keeps escaping as before (code may not nest in bold)
+    assert.equal(toMarkdownV2("*a`b*"), "*a\\`b*");
+  });
+
   test("unclosed markers are treated as ordinary text (escaped)", () => {
     assert.equal(toMarkdownV2("*непарный"), "\\*непарный");
     // a line break inside an inline marker → not markup

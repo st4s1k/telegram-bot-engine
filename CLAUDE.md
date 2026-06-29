@@ -116,7 +116,7 @@ Long-term memory stores **curated facts** (not every raw message): facts auto-ex
 
 ### Telegram output (`sendTelegramMessage`)
 
-Outgoing text is treated as a lightweight Markdown that `toMarkdownV2` converts to valid Telegram MarkdownV2 — it **escapes everything except intentional paired markup** (`*bold*`, `_italic_`, `~strike~`, `||spoiler||`, `` `code` ``, ```` ```block``` ````, `[text](url)`). `**` is normalized to `*` and `##`–`####` headings to bold first. Sends try MarkdownV2, then fall back to plain text. Messages over `TELEGRAM_MSG_LIMIT` (4096) are split (surrogate-pair safe).
+Outgoing text is treated as a lightweight Markdown that `toMarkdownV2` converts to valid Telegram MarkdownV2 — it **escapes everything except intentional paired markup** (`*bold*`, `_italic_`, `~strike~`, `||spoiler||`, `` `code` ``, ```` ```block``` ````, `[text](url)`). A `[text](url)` link nested **inside** a styled span (`*…*`/`_…_`/`~…~`/`||…||`) is **preserved** (`escInline`) — Telegram allows a text_link inside those entities, so e.g. a bold `/summary` header keeps its linkified `HH:MM` deep-links clickable instead of rendering them raw; stray markers/backticks inside the span still escape as before (code may not nest in bold). `**` is normalized to `*` and `##`–`####` headings to bold first. Sends try MarkdownV2, then fall back to plain text. Messages over `TELEGRAM_MSG_LIMIT` (4096) are split (surrogate-pair safe).
 
 ## Persona pack (the swappable personality)
 
