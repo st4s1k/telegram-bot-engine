@@ -7,7 +7,7 @@ import { SUMMARY_MAX_TOKENS } from "./constants";
 import { messagesSince } from "./storage";
 import { runLLMWithHistory } from "./llm";
 import { buildSummaryPrompt } from "./prompts";
-import { isFallbackMessage, linkifySummaryTimes } from "./utils";
+import { isFallbackMessage, linkifySummaryTimes, appendPrevSummaryLink } from "./utils";
 import { t } from "./i18n";
 import type { Ctx } from "./types";
 
@@ -40,6 +40,10 @@ export async function runIncrementalSummary(
   if (isFallbackMessage(summary)) return { text: summary, maxId: sinceId, hadNew: false };
   ctx.chatData._summary = summary; // store the RAW digest (fed back as "already known" context next time)
   ctx.chatData._dirty = true;
-  // …but SHOW it with HH:MM timestamps linkified to the messages they reference (supergroups only).
-  return { text: linkifySummaryTimes(summary, items, ctx.chatId, ctx.cfg.timezone), maxId, hadNew: true };
+  // …but SHOW it with HH:MM timestamps linkified to the messages they reference, plus a deep-link back to the
+  // PREVIOUS summary at the end (both supergroups-only). The shown form is never stored in _summary (raw stays
+  // clean); _summaryMsgId is read here BEFORE the caller's send overwrites it with this summary's own id.
+  let shown = linkifySummaryTimes(summary, items, ctx.chatId, ctx.cfg.timezone);
+  shown = appendPrevSummaryLink(shown, ctx.chatId, ctx.chatData._summaryMsgId || 0, t(ctx.cfg.lang, "sum_prev_link"));
+  return { text: shown, maxId, hadNew: true };
 }

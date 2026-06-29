@@ -82,6 +82,20 @@ describe("CRON · daily summary", () => {
     assert.equal((await dbChat(env, failChat)).daily_upto_id, 0); // the failed one's did not
   });
 
+  test("supergroup: the daily summary deep-links to the previous one and advances the pointer", async () => {
+    const env = makeEnv({ BOT_TZ: "Europe/Chisinau" });
+    const SG = -1009876543210; // supergroup → internal id 9876543210
+    await seedChat(env, SG, { config: { daily_summary: true }, history: hist3(), _summaryMsgId: 444 });
+    FETCH.set("chat", () => sse(["суточный дайджест"]));
+    await runDailySummaries(env, SUMMER_8);
+    const sent = FETCH.sends().at(-1).body.text;
+    assert.ok(sent.includes("суточный дайджест"));
+    assert.ok(sent.includes("t.me/c/9876543210/444")); // link back to the previous daily summary
+    const row = await dbChat(env, SG);
+    assert.notEqual(Number(row.summary_msg_id), 444);   // pointer advanced to the freshly posted message
+    assert.ok(Number(row.summary_msg_id) >= 5000);
+  });
+
   test("WORKER.scheduled delegates to runDailySummaries", async () => {
     const env = makeEnv({ BOT_TZ: "Europe/Chisinau" });
     await seedChat(env, 100, { config: { daily_summary: true }, history: hist3() });

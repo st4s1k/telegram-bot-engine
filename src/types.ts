@@ -172,6 +172,9 @@ export interface ChatState {
   _name: string;
   /** text of the last /summary digest (mixed into the prompt as «already known — do not repeat») */
   _summary: string;
+  /** Telegram message_id of the LAST summary message we POSTED in this chat (0 = none yet). Each fresh
+   *  digest deep-links back to it ("previous summary"); supergroups only — see appendPrevSummaryLink. */
+  _summaryMsgId: number;
   /** boundary of the last DAILY (cron) summary: the max messages.id included in it */
   _dailyUptoId: number;
   /** boundary of the last COMMAND /summary: max messages.id (reset every day) */
@@ -261,6 +264,9 @@ export interface Ctx {
   /** transient: ctx is an /admin chat_cmd preview in ANOTHER chat; write-through side effects (memory
    *  curation, etc.) must be suppressed so we don't write into the target chat (flush is skipped anyway) */
   _preview?: boolean;
+  /** transient: the /summary handler just produced a FRESH digest (hadNew); tryCommand reads this after
+   *  sending to record the sent message_id as _summaryMsgId (the "previous summary" pointer). */
+  _trackSummaryMsg?: boolean;
 }
 
 export interface CommandMode {

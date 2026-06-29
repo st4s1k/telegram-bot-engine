@@ -242,6 +242,7 @@
 
   "sum_nothing_new": "nothing to summarize yet — nothing new since the last summary.",
   "sum_too_few": "nothing to summarize yet — fewer than 3 messages in history.",
+  "sum_prev_link": "↩︎ Previous summary",
 
   "vis_photo": "photo",
   "vis_sticker": "sticker",

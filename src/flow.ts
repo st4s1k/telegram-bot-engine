@@ -265,7 +265,9 @@ export async function runDailySummaries(env: Env, scheduledTimeMs: number): Prom
         if (hadNew) {
           ctx.chatData._dailyUptoId = maxId;
           ctx.chatData._dirty = true;
-          await sendAndStore(ctx, text, { skipHistory: true }); // send, but NOT to history
+          const res = await sendAndStore(ctx, text, { skipHistory: true }); // send, but NOT to history
+          // Remember the posted message as the "previous summary" pointer (supergroups deep-link to it next time).
+          if (res?.result?.message_id) ctx.chatData._summaryMsgId = res.result.message_id;
         }
       }
       if (ctx.chatData._dirty && !ctx.chatData._loadFailed) await flushChatData(chatId, env, ctx.chatData);

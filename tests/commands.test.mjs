@@ -418,3 +418,57 @@ describe("audit: memory and model branches", () => {
 });
 
 
+describe("summary: «previous summary» deep-link + pointer", () => {
+  const hist3 = () => [
+    { role: "user", content: "обсуждаем котов" },
+    { role: "assistant", content: "коты топ" },
+    { role: "user", content: "и собак" },
+  ];
+  const SG = -1001234567890; // supergroup → internal id 1234567890
+
+  test("appendPrevSummaryLink: supergroup w/ prev id appends a deep-link; private/no-id leave text intact", () => {
+    assert.equal(
+      H.appendPrevSummaryLink("дайджест", SG, 777, "назад"),
+      "дайджест\n\n[назад](https://t.me/c/1234567890/777)"
+    );
+    assert.equal(H.appendPrevSummaryLink("дайджест", SG, 0, "назад"), "дайджест");   // no previous summary yet
+    assert.equal(H.appendPrevSummaryLink("дайджест", 555, 777, "назад"), "дайджест"); // private chat → no deep-link
+  });
+
+  test("/summary in a supergroup: links back to the seeded prev summary, then records the new message_id", async () => {
+    const env = makeEnv();
+    await seedChat(env, SG, { history: hist3(), _summaryMsgId: 777 }); // a prior summary lives at message 777
+    FETCH.set("chat", () => sse(["новая сводка"]));
+    await handleTelegramMessage(makeMsg({ chat: { id: SG, type: "supergroup" }, text: "/summary" }), env);
+
+    const sent = FETCH.sends().at(-1).body.text;
+    assert.ok(sent.includes("новая сводка"));
+    assert.ok(sent.includes("t.me/c/1234567890/777")); // deep-link to the PREVIOUS summary
+    // The just-posted summary becomes the next «previous»: pointer advanced to the sent message_id (mock: 5001+).
+    const row = await dbChat(env, SG);
+    assert.ok(Number(row.summary_msg_id) >= 5000);
+    assert.notEqual(Number(row.summary_msg_id), 777);
+  });
+
+  test("first-ever /summary (no prior) in a supergroup: no link, but the pointer is set for next time", async () => {
+    const env = makeEnv();
+    await seedChat(env, SG, { history: hist3() }); // _summaryMsgId defaults to 0
+    FETCH.set("chat", () => sse(["первая сводка"]));
+    await handleTelegramMessage(makeMsg({ chat: { id: SG, type: "supergroup" }, text: "/summary" }), env);
+
+    const sent = FETCH.sends().at(-1).body.text;
+    assert.ok(sent.includes("первая сводка"));
+    assert.ok(!sent.includes("t.me/c/")); // nothing to link back to yet
+    assert.ok(Number((await dbChat(env, SG)).summary_msg_id) >= 5000); // but recorded for the next one
+  });
+
+  test("/summary refusal (nothing new) does NOT move the pointer", async () => {
+    const env = makeEnv();
+    await seedChat(env, SG, { history: hist3(), _summaryMsgId: 777, _dailyUptoId: 3 }); // boundary already at last id
+    await handleTelegramMessage(makeMsg({ chat: { id: SG, type: "supergroup" }, text: "/summary" }), env);
+    assert.equal(FETCH.of("/chat/completions").length, 0);     // no new digest generated
+    assert.equal(Number((await dbChat(env, SG)).summary_msg_id), 777); // pointer untouched
+  });
+});
+
+

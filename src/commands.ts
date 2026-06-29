@@ -507,6 +507,11 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
       ctx.chatData._cmdDay = today;
       ctx.chatData._dirty = true;
     }
+    // On a FRESH digest, ask tryCommand to remember the sent message_id as the "previous summary" pointer
+    // (so the next /summary deep-links back to this one). A cache/refusal (hadNew=false) doesn't move it.
+    // We send via the normal command path (tryCommand) — NOT here — so the /admin preview keeps returning the
+    // text to the admin without ever posting into the target chat (the handler stays send-free).
+    ctx._trackSummaryMsg = hadNew;
     return text;
   },
 
@@ -611,7 +616,13 @@ export async function tryCommand(mode: CommandMode, ctx: Ctx): Promise<boolean> 
   const out = await COMMANDS[mode.type](ctx, mode);
   // The handler may return null/empty (e.g. /admin for a non-admin) — then we stay silent.
   if (out != null && String(out).trim()) {
-    await sendAndStore(ctx, out, { skipHistory: TECH_COMMANDS.has(mode.type) });
+    const res = await sendAndStore(ctx, out, { skipHistory: TECH_COMMANDS.has(mode.type) });
+    // /summary on a fresh digest: remember the message we just posted as the "previous summary" pointer,
+    // so the next summary can deep-link back to it (the handler set _trackSummaryMsg; see ENGINE_COMMANDS.summary).
+    if (ctx._trackSummaryMsg && res?.result?.message_id) {
+      ctx.chatData._summaryMsgId = res.result.message_id;
+      ctx.chatData._dirty = true;
+    }
   }
   return true;
 }

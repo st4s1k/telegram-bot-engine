@@ -58,6 +58,7 @@ export const DEFAULT_CHAT_DATA = (): ChatData => ({
   spendCount: 0,   // number of paid requests
   _name: "",       // chat name: group title or interlocutor's name (for /admin)
   _summary: "",    // text of the last /summary digest (the «already known» context for the next one)
+  _summaryMsgId: 0, // Telegram message_id of the last summary we posted (0 = none) — the «previous summary» deep-link target
   _dailyUptoId: 0, // boundary of the last daily (cron) summary
   _cmdUptoId: 0,   // boundary of the last command-issued /summary
   _cmdDay: "",     // date (configured timezone) of the last command summary (daily reset of _cmdUptoId)
@@ -98,6 +99,7 @@ export async function getChatData(chatId: number | string, env: Env): Promise<Ch
     spendCount: Number(row.spend_count) || 0,
     _name: typeof row.name === "string" ? row.name : "",
     _summary: typeof row.summary === "string" ? row.summary : "",
+    _summaryMsgId: Number(row.summary_msg_id) || 0,
     _dailyUptoId: Number(row.daily_upto_id) || 0,
     _cmdUptoId: Number(row.cmd_upto_id) || 0,
     _cmdDay: typeof row.cmd_day === "string" ? row.cmd_day : "",
@@ -114,12 +116,12 @@ export async function flushChatData(chatId: number | string, env: Env, data: Cha
   if (data._loadFailed) return;
   const id = String(chatId);
   await env.DB.prepare(
-    `INSERT INTO chats (chat_id, name, persona_state, role, paused, config, photo_cache, spend, spend_count, summary, daily_upto_id, cmd_upto_id, cmd_day, mem_upto_id, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `INSERT INTO chats (chat_id, name, persona_state, role, paused, config, photo_cache, spend, spend_count, summary, summary_msg_id, daily_upto_id, cmd_upto_id, cmd_day, mem_upto_id, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(chat_id) DO UPDATE SET
        name=excluded.name, persona_state=excluded.persona_state, role=excluded.role, paused=excluded.paused,
        config=excluded.config, photo_cache=excluded.photo_cache, spend=excluded.spend,
-       spend_count=excluded.spend_count, summary=excluded.summary,
+       spend_count=excluded.spend_count, summary=excluded.summary, summary_msg_id=excluded.summary_msg_id,
        daily_upto_id=excluded.daily_upto_id, cmd_upto_id=excluded.cmd_upto_id, cmd_day=excluded.cmd_day,
        mem_upto_id=excluded.mem_upto_id, updated_at=excluded.updated_at`
   ).bind(
@@ -133,6 +135,7 @@ export async function flushChatData(chatId: number | string, env: Env, data: Cha
     data.spend || 0,
     data.spendCount || 0,
     data._summary || "",
+    data._summaryMsgId || 0,
     data._dailyUptoId || 0,
     data._cmdUptoId || 0,
     data._cmdDay || "",

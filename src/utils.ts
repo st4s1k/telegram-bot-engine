@@ -326,6 +326,19 @@ export function linkifySummaryTimes(text: string, items: HistoryItem[], chatId: 
   });
 }
 
+// Append a tappable "previous summary" deep-link to a fresh /summary digest, so each summary links back to
+// the one before it. Like the HH:MM links above, a per-message deep-link (t.me/c/<id>/<msg_id>) only exists
+// in SUPERGROUPS (chat_id like -100…) — in private chats / basic groups there are none, so the text is
+// returned unchanged. `prevMsgId` is the message_id of the last summary we posted in this chat (0 = none yet
+// → no link). `label` is the already-localized link text (sum_prev_link). Output is a lightweight Markdown
+// link that sendTelegramMessage's toMarkdownV2 preserves.
+export function appendPrevSummaryLink(text: string, chatId: number | string, prevMsgId: number, label: string): string {
+  if (!prevMsgId) return text;                 // no previous summary yet → nothing to link
+  const sg = String(chatId).match(/^-100(\d+)$/);
+  if (!sg) return text;                        // not a supergroup → no per-message deep-link
+  return `${text}\n\n[${label}](https://t.me/c/${sg[1]}/${prevMsgId})`;
+}
+
 // The bot's technical fallbacks (LLM errors). We don't save them to the history.
 export function isFallbackMessage(text: string): boolean {
   return getAllFallbackTexts().includes(String(text).trim());
