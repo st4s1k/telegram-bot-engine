@@ -7,7 +7,7 @@ import {
   FETCH, sse, DEFAULT_CHAT_DATA,
   appendHistory, handleChatMessage,
   ragRetrieveMemories, addMemory, listMemories, runMemoryCuration, parseExtractedFacts,
-  memVectorId, memNamespace, COMMANDS, parseCommandAndArg,
+  memVectorId, memNamespace, COMMANDS, parseCommandAndArg, stripBotAddressing, getGlobalConfig,
 } from "./harness.mjs";
 
 // Run /memory through REAL parsing (parseCommandAndArg → stripBotMentions), not directly —
@@ -217,6 +217,36 @@ describe("Memory · recall of facts from mem:", () => {
     assert.ok(sys.includes("УНИКМАРКЕР"));
     const nonSys = body.messages.filter(m => m.role !== "system").map(m => JSON.stringify(m.content)).join(" ");
     assert.ok(!nonSys.includes("УНИКМАРКЕР"));
+  });
+
+  test("the recall query is embedded WITHOUT the bot addressing (@username stripped)", async () => {
+    const env = ragEnv();
+    const cd = { ...DEFAULT_CHAT_DATA(), config: { rag_min_score: 0 } };
+    const ctx = makeCtxFor(makeMsg({ chatId: 111, chatType: "private", text: "@testbot где отпуск Алёны" }), env, cd);
+    seedMemories(env, 111, [{ mem_id: 1, text: "Алёна в отпуске в Полоцке" }]);
+    FETCH.set("chat", () => sse(["ок"]));
+    await handleChatMessage(ctx);
+    // seedMemories embeds the seeded facts too — take the LAST embed call (the recall query).
+    const queryEmbed = env._ai.calls.at(-1).inputs.text[0];
+    assert.ok(!queryEmbed.includes("@testbot"));       // the addressing is stripped from the query…
+    assert.ok(queryEmbed.includes("где отпуск Алёны")); // …the question itself is intact
+  });
+
+  test("a bare addressing with a trivial remainder (<4 chars) → no embed, no query", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 112, chatType: "private", text: "@testbot ну" }), env);
+    seedMemories(env, 112, [{ mem_id: 1, text: "факт" }]);
+    const before = env._ai.calls.length; // seeding embeds
+    FETCH.set("chat", () => sse(["ок"]));
+    await handleChatMessage(ctx);
+    assert.equal(env._ai.calls.length, before); // recall skipped: nothing meaningful left to embed
+  });
+
+  test("stripBotAddressing: strips @username and persona wake-word tokens, keeps the question", () => {
+    const cfg = getGlobalConfig(makeEnv());
+    assert.equal(stripBotAddressing("@testbot где отпуск?", cfg), "где отпуск?");
+    assert.equal(stripBotAddressing("привет как дела", cfg), "привет как дела"); // no addressing → unchanged
+    assert.equal(stripBotAddressing("@testbot", cfg), "");                       // nothing but addressing
   });
 });
 

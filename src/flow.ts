@@ -5,6 +5,7 @@
 import {
   makeCtx, shouldAnswer, parseCommandAndArg, chatTitleFromMsg, buildUserItem, visualLabel,
   lastToken, pickOne, getReplyText, tzParts, chatAliases, messageMentionsBot, unknownCommandName,
+  stripBotAddressing,
 } from "./utils";
 import { getChatData, flushChatData, updateHistoryMessage, appendHistory, parseJson, purgeExpiredData } from "./storage";
 import { getGlobalConfig, mergeConfig } from "./config";
@@ -189,11 +190,12 @@ export async function handleChatMessage(ctx: Ctx): Promise<void> {
 
   // Long-term memory (RAG): mix in relevant old messages only into the regular reply
   // (default) and only if enabled. Content throws from the pack don't use memory.
-  // Skip the embed + vector query for trivially short messages ("ok", an emoji) — they can't clear
-  // rag_min_score anyway, so don't pay the Workers-AI embed + Vectorize round-trip on the hot reply path.
-  const memories = (kind === "default" && ctx.cfg.rag && (ctx.textRaw || "").trim().length >= 4)
-    ? await ragRetrieveMemories(ctx, ctx.textRaw)
-    : [];
+  // The query is the message WITHOUT the bot addressing (@username + wake words) — the addressing is
+  // noise that drags the embedding toward facts about the bot itself and away from the question.
+  // Skip the embed + vector query for trivially short remainders ("ok", an emoji, a bare «Фасол?») —
+  // they can't clear rag_min_score anyway, so don't pay the embed + Vectorize round-trip on the hot path.
+  const ragQuery = (kind === "default" && ctx.cfg.rag) ? stripBotAddressing(ctx.textRaw || "", ctx.cfg) : "";
+  const memories = ragQuery.length >= 4 ? await ragRetrieveMemories(ctx, ragQuery) : [];
 
   await sendTyping(ctx); // instant "bot is typing" feedback while the model thinks
   const out = await handler(ctx, memories);

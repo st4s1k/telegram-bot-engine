@@ -101,7 +101,9 @@ export function getGlobalConfig(env: Env): BotConfig {
     // min_score — the cosine-similarity threshold (0–1).
     rag: bool(env.ENABLE_RAG),
     rag_top_k: num(env.RAG_TOP_K, 5),
-    rag_min_score: num(env.RAG_MIN_SCORE, 0.5),
+    // 0.45, not 0.5: measured on the live bge-m3 index, correct facts often score 0.45–0.5 while junk can
+    // sit just above 0.5 — a hair lower keeps the right facts in (topK still caps the noise).
+    rag_min_score: num(env.RAG_MIN_SCORE, 0.45),
     // Daily summary via cron (08:00 in the configured timezone) — opt-in per chat via /config daily_summary on.
     // OFF by default: the bot sends nothing on its own until the chat has subscribed.
     daily_summary: false,

@@ -121,7 +121,7 @@ export async function ragRetrieveMemories(ctx: Ctx, queryText: string): Promise<
       RAG_TIMEOUT_MS,
     );
     const matches = res?.matches || [];
-    const minScore = Number.isFinite(ctx.cfg.rag_min_score) ? ctx.cfg.rag_min_score : 0.5;
+    const minScore = Number.isFinite(ctx.cfg.rag_min_score) ? ctx.cfg.rag_min_score : 0.45; // keep in sync with getGlobalConfig's default
 
     const kept: string[] = [];
     for (const m of matches) {

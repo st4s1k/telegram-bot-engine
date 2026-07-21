@@ -123,6 +123,20 @@ export function stripBotMentions(s: string, cfg: BotConfig): string {
     .trim();                    // (needed for multi-line /memory add — effectively one fact per line)
 }
 
+// Strip ALL bot addressing from a text: the @username mention AND any word containing a persona wake-word
+// substring («Фасол», «фасолик», …). For the RAG recall query — the addressing is pure noise there: it
+// drags the embedding toward facts about the bot itself and away from the actual question
+// («Фасол, кто такая Туча?» must embed as «кто такая Туча?»). Neutral pack (no wake words) → only the
+// @mention is stripped. NOT for display — punctuation next to the removed word stays as-is.
+export function stripBotAddressing(s: string, cfg: BotConfig): string {
+  const words = (getPersona().wakeWords ?? []).map(w => w.toLowerCase()).filter(Boolean);
+  return stripBotMentions(s, cfg)
+    .split(/\s+/)
+    .filter(tok => { const lt = tok.toLowerCase(); return !words.some(w => lt.includes(w)); })
+    .join(" ")
+    .trim();
+}
+
 export function parseRoots(s: string, cfg: BotConfig): string[] {
   return Array.from(new Set(
     stripBotMentions(s, cfg).toLowerCase().split(/[,\s]+/).filter(Boolean)
