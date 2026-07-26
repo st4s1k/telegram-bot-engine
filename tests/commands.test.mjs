@@ -363,6 +363,24 @@ describe("/retry (re-run last message, via handleTelegramMessage → handleRetry
     assert.equal(FETCH.of("/chat/completions").length, 0);
     assert.ok(FETCH.sends().some(s => /Нечего повторять/.test(s.body.text)));
   });
+
+  test("group /retry@bot: replay answers even without a wake word (shouldAnswer NOT re-rolled)", async () => {
+    // The live failure: the bot's reply errored (fallback + /retry hint), the user tapped /retry —
+    // Telegram sends «/retry@<bot>» in groups. The replayed text has no wake word/@mention, so
+    // re-running shouldAnswer would fail the mention check and then the answer_prob roll → silence.
+    // With force the replay answers unconditionally.
+    const env = makeEnv();
+    await seedChat(env, -100500, { history: [
+      { role: "user", content: "разве боль одинаковая если источник один?", meta: { message_id: 7 } },
+    ] });
+    FETCH.set("chat", () => sse(["отвечаю со второй попытки"]));
+    stubRandom(0.99); // the answer_prob roll would LOSE — force must bypass it
+    await handleTelegramMessage(makeMsg({ chat: { id: -100500, type: "group" }, text: "/retry@testbot" }), env);
+    assert.ok(FETCH.sends().some(s => s.body.text.includes("отвечаю со второй попытки")));
+    // and the regenerated reply is stored as a normal chat turn
+    const hist = await dbHistory(env, -100500);
+    assert.ok(hist.some(h => h.role === "assistant" && h.content.includes("со второй попытки")));
+  });
 });
 
 

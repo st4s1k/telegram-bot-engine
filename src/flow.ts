@@ -133,7 +133,10 @@ async function handleRetry(ctx: Ctx): Promise<void> {
   if (rctx.chatData.paused && !isCommand(rmode.type)) return;
   if (!rctx.chatData.paused && rctx.cfg.random && await tryQuickReply(rctx)) return;
   if (await tryCommand(rmode, rctx)) return;
-  await handleChatMessage(rctx);
+  // force: the user EXPLICITLY asked to re-run — answer unconditionally. The replayed text usually has no
+  // wake word/@mention (the original was addressed via a reply or a random roll), so re-running the
+  // shouldAnswer gate here would silently drop the replay in groups.
+  await handleChatMessage(rctx, { force: true });
 }
 
 /* ================= QUICK REPLIES ================= */
@@ -177,8 +180,12 @@ export const RANDOM_HANDLERS: Record<string, (ctx: Ctx, memories?: string[]) => 
   ...Object.fromEntries(getPersonaThrows().map((t) => [t.name, t.handler])),
 };
 
-export async function handleChatMessage(ctx: Ctx): Promise<void> {
-  const decision = shouldAnswer(ctx.textRaw, ctx.msg, ctx.cfg);
+export async function handleChatMessage(ctx: Ctx, opts: { force?: boolean } = {}): Promise<void> {
+  // force — an explicit user request to answer (/retry replay): skip the shouldAnswer gate entirely.
+  // Without it, a group replay of a message with no wake word / @mention would silently lose the
+  // mention check and then the answer_prob roll — the exact «/retry did nothing» failure.
+  // reason "addressed" (not "random") also pins kind to "default": a retry never turns into a random throw.
+  const decision = opts.force ? { answer: true, reason: "addressed" } : shouldAnswer(ctx.textRaw, ctx.msg, ctx.cfg);
   if (!decision.answer) return;
 
   // A random throw — only if the bot itself decided to reply (not addressed) and it's not a reply
