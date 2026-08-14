@@ -265,6 +265,24 @@ describe("default.fetch (webhook)", () => {
   const ctxObj = { waitUntil() {} };
   const post = (update) => ({ method: "POST", json: async () => update });
 
+  test("menu self-sync on deploy: the FIRST update in an isolate pushes setMyCommands, later ones skip", async () => {
+    H._resetMenuSyncMemo(); // simulate a fresh isolate (as after a deploy)
+    const env = makeEnv();
+    let bg;
+    const capturingCtx = { waitUntil(p) { bg = p; } };
+    FETCH.set("chat", () => sse(["хай"]));
+    await WORKER.fetch(post({ update_id: 900, message: makeMsg({ chatType: "private", chatId: 555, text: "привет" }) }), env, capturingCtx);
+    assert.ok(bg); // the background sync was scheduled…
+    await bg;      // …let it finish
+    const syncCalls = FETCH.of("/setMyCommands").length;
+    assert.ok(syncCalls > 0, "fresh isolate + new fingerprint → the menu is pushed");
+    // A second update in the SAME isolate: the memo skips even the KV check — no new waitUntil, no new calls.
+    bg = undefined;
+    await WORKER.fetch(post({ update_id: 901, message: makeMsg({ chatType: "private", chatId: 555, text: "ещё" }) }), env, capturingCtx);
+    assert.equal(bg, undefined);
+    assert.equal(FETCH.of("/setMyCommands").length, syncCalls);
+  });
+
   test("GET → string about the worker running", async () => {
     const res = await WORKER.fetch({ method: "GET" }, makeEnv(), ctxObj);
     assert.ok((await res.text()).includes("running"));

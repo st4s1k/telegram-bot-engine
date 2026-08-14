@@ -13,6 +13,13 @@ import { handleTelegramMessage, runDailySummaries } from "./flow";
 import { reportError, maybeSyncBotCommands } from "./telegram";
 import type { Env, TgUpdate } from "./types";
 
+// Once-per-ISOLATE memo for the menu self-sync below. A deploy spins up fresh isolates (flag = false), so
+// the first webhook update after a deploy re-checks the KV fingerprint and pushes the menu if the command
+// set changed — no waiting for the daily cron. Later updates in the same isolate skip even the KV read.
+let menuSyncTried = false;
+// Test hook: vitest runs many logically-separate "deploys" in one process; reset the isolate memo between them.
+export function _resetMenuSyncMemo(): void { menuSyncTried = false; }
+
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     if (request.method === "POST") {
@@ -23,6 +30,15 @@ export default {
       if (env.TELEGRAM_WEBHOOK_SECRET && request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TELEGRAM_WEBHOOK_SECRET) {
         return new Response("ok");
       }
+
+      // Menu self-sync on deploy: the FIRST update each isolate handles re-runs the fingerprint-guarded
+      // sync in the background (waitUntil — never delays the reply; killed mid-flight → the next isolate
+      // or the cron retries). With an unchanged command set this costs one KV read per isolate lifetime.
+      if (!menuSyncTried) {
+        menuSyncTried = true;
+        _ctx.waitUntil(maybeSyncBotCommands(env).catch((e: any) => reportError(env, "maybeSyncBotCommands", e)));
+      }
+
       const update = (await request.json().catch(() => null)) as TgUpdate | null;
       const isEdit = !!(update && update.edited_message);
       const msg = update && (update.message || update.edited_message);
