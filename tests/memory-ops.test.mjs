@@ -491,3 +491,44 @@ describe("parseMemoryOps · id spelling tolerance", () => {
     assert.deepEqual(ops.deletes, []); // 999 was not shown → hallucinated id, dropped
   });
 });
+
+describe("/memory consolidate · finish_reason=length", () => {
+  test("a pass cut by max_tokens: its LAST line is dropped, the complete lines before it are applied", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 91, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
+    const a = await addMemory(ctx, "one", "auto");
+    const b = await addMemory(ctx, "two", "auto");
+    const c = await addMemory(ctx, "three", "auto");
+    // SSE with finish_reason=length: the reply ends mid-UPDATE
+    const body = `DELETE ${b}\nUPDATE ${c}: three became something lon`;
+    FETCH.set("chat", () => sse([], { raw: "data: " + JSON.stringify({ choices: [{ delta: { content: body }, finish_reason: "length" }] }) + "\ndata: [DONE]" }));
+    const out = await runMemory(ctx, "/memory consolidate");
+    assert.match(out, /deleted 1/);
+    assert.deepEqual((await dbMemories(env, 91)).map(r => r.text), ["one", "three"]); // UPDATE c NOT applied
+  });
+  test("finish_reason=stop: the last line is a normal op", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 92, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
+    await addMemory(ctx, "one", "auto");
+    const c = await addMemory(ctx, "three", "auto");
+    FETCH.set("chat", () => sse([], { raw: "data: " + JSON.stringify({ choices: [{ delta: { content: `UPDATE ${c}: three, fully stated` }, finish_reason: "stop" }] }) + "\ndata: [DONE]" }));
+    await runMemory(ctx, "/memory consolidate");
+    assert.deepEqual((await dbMemories(env, 92)).map(r => r.text), ["one", "three, fully stated"]);
+  });
+});
+describe("applyMemoryOps · concurrency", () => {
+  test("deletes of one pass are applied concurrently (several D1 deletes in flight at once)", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 90 }), env, { ...DEFAULT_CHAT_DATA() });
+    const ids = [];
+    for (let i = 0; i < 6; i++) ids.push(await addMemory(ctx, "f" + i, "auto"));
+    // instrument the vector delete (called once per deleted fact) to observe overlap
+    let inFlight = 0, maxInFlight = 0;
+    const orig = env.VECTORIZE.deleteByIds.bind(env.VECTORIZE);
+    env.VECTORIZE.deleteByIds = async (v) => { inFlight++; maxInFlight = Math.max(maxInFlight, inFlight); await new Promise(r => setTimeout(r, 15)); inFlight--; return orig(v); };
+    const res = await applyMemoryOps(ctx, { adds: [], updates: [], deletes: ids });
+    assert.equal(res.deleted, 6);
+    assert.ok(maxInFlight > 1, "expected overlapping deletes, got " + maxInFlight);
+    assert.equal((await dbMemories(env, 90)).length, 0);
+  });
+});

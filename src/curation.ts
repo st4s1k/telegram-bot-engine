@@ -13,7 +13,7 @@
 
 import {
   MEM_CURATION_MIN_NEW, MEM_MAX_FACTS_PER_RUN, MEM_MAX_FACT_CHARS, MEM_MAX_TOKENS,
-  MEM_KNOWN_SHOWN, MEM_CONSOLIDATE_MAX, MEM_CONSOLIDATE_MAX_TOKENS, MEM_CONSOLIDATE_TIME_BUDGET_MS, MEM_CONSOLIDATE_PARALLEL, MEM_CONSOLIDATE_ROUND_FLOOR_MS,
+  MEM_KNOWN_SHOWN, MEM_CONSOLIDATE_MAX, MEM_CONSOLIDATE_MAX_TOKENS, MEM_CONSOLIDATE_TIME_BUDGET_MS, MEM_CONSOLIDATE_PARALLEL, MEM_CONSOLIDATE_ROUND_FLOOR_MS, MEM_APPLY_PARALLEL,
 } from "./constants";
 import { messagesSince, addMemory, listMemories, updateMemory, deleteMemory } from "./storage";
 import { runLLMWithHistory } from "./llm";
@@ -131,17 +131,23 @@ export function parseExtractedFacts(out: string, existing: string[] = [], lang: 
 
 // Apply parsed operations to storage (D1 rows + Vectorize vectors). Deletes first, then updates, then
 // adds — so a merge that deletes an id never races its own update. Best-effort per op.
+// Ops of one phase are independent (distinct ids), so each phase runs CONCURRENTLY in chunks of
+// MEM_APPLY_PARALLEL — a consolidation pass can emit dozens of ops, and applied one by one (D1 +
+// Vectorize + an embed per UPDATE) they alone could push the webhook past its limit. Phase order is
+// kept: deletes → updates → adds (a merge never races its own update).
+async function eachConcurrently<T>(items: T[], fn: (x: T) => Promise<boolean>): Promise<number> {
+  let n = 0;
+  for (let i = 0; i < items.length; i += MEM_APPLY_PARALLEL) {
+    const res = await Promise.all(items.slice(i, i + MEM_APPLY_PARALLEL).map(x => fn(x).catch(() => false)));
+    n += res.filter(Boolean).length;
+  }
+  return n;
+}
 export async function applyMemoryOps(ctx: Ctx, ops: MemoryOps): Promise<ApplyResult> {
   const res: ApplyResult = { added: 0, updated: 0, deleted: 0 };
-  for (const id of ops.deletes) {
-    if (await deleteMemory(ctx, id)) res.deleted++;
-  }
-  for (const u of ops.updates) {
-    if (await updateMemory(ctx, u.id, u.text)) res.updated++;
-  }
-  for (const text of ops.adds) {
-    if (await addMemory(ctx, text, "auto")) res.added++;
-  }
+  res.deleted = await eachConcurrently(ops.deletes, (id) => deleteMemory(ctx, id));
+  res.updated = await eachConcurrently(ops.updates, (u) => updateMemory(ctx, u.id, u.text));
+  res.added = await eachConcurrently(ops.adds, async (text) => !!(await addMemory(ctx, text, "auto")));
   return res;
 }
 
@@ -258,14 +264,24 @@ export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number; p
 
   const t0 = Date.now();
   let passes = 0, updated = 0, deleted = 0, lastRoundMs = 0, failed = false;
-  const passOver = (slice: KnownFact[]): Promise<string> => runLLMWithHistory(
+  // A pass cut by max_tokens (finish=length) ends in a partial line — drop it: applying a fragment as an
+  // UPDATE would overwrite a fact with half a sentence. (A complete last line lost this way is just redone next time.)
+  const passOver = async (slice: KnownFact[]): Promise<string> => {
+    let truncated = false;
+    const out = await runLLMWithHistory(
     ctx.cfg,
     buildMemoryConsolidationPrompt(ctx.cfg.lang, slice),
     [],
     t(ctx.cfg.lang, "mem_consolidate_user_turn"),
     ctx.msg,
-    { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel, maxTokens: MEM_CONSOLIDATE_MAX_TOKENS, reasoning: false }
-  );
+      { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel, maxTokens: MEM_CONSOLIDATE_MAX_TOKENS, reasoning: false,
+        onMeta: (m) => { if (m.finishReason === "length") truncated = true; } }
+    );
+    if (!truncated || isFallbackMessage(out)) return out;
+    const lines = out.split("\n");
+    lines.pop();
+    return lines.join("\n");
+  };
   while (start < total && !failed) {
     // Never start a round that (judging by the previous one) would overrun the budget; the first always runs.
     if (passes > 0 && Date.now() - t0 + lastRoundMs >= budgetMs) break;

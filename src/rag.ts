@@ -58,7 +58,7 @@ export async function ragUpsertMemory(ctx: Ctx, mem: { id: number; text: string;
   try {
     const vectors = await embedTexts(ctx.env, [mem.text]);
     if (!vectors) return;
-    await ctx.env.VECTORIZE.upsert([{
+    await withTimeout(ctx.env.VECTORIZE.upsert([{
       id: memVectorId(ctx.chatId, mem.id),
       values: vectors[0],
       namespace: memNamespace(ctx.chatId),
@@ -68,7 +68,7 @@ export async function ragUpsertMemory(ctx: Ctx, mem: { id: number; text: string;
         text: String(mem.text).slice(0, RAG_META_TEXT_CAP),
         source: mem.source,
       },
-    }]);
+    }]), RAG_TIMEOUT_MS); // bounded: a hung Vectorize mutation must not stall the caller
   } catch (e: any) {
     console.warn("rag.ragUpsertMemory failed", { chatId: ctx.chatId, err: e?.message || e });
   }
@@ -79,7 +79,7 @@ export async function ragUpsertMemory(ctx: Ctx, mem: { id: number; text: string;
 export async function ragDeleteIds(ctx: Ctx, vectorIds: string[]): Promise<void> {
   if (!ctx.env.VECTORIZE || !vectorIds.length) return;
   try {
-    await ctx.env.VECTORIZE.deleteByIds(vectorIds);
+    await withTimeout(ctx.env.VECTORIZE.deleteByIds(vectorIds), RAG_TIMEOUT_MS);
   } catch (e: any) {
     console.warn("rag.ragDeleteIds failed", { chatId: ctx.chatId, err: e?.message || e });
   }
@@ -96,7 +96,7 @@ export async function deleteChatMemoryVectors(ctx: Ctx, memIds: number[]): Promi
 export async function ragDeleteIdsEnv(env: Env, vectorIds: string[]): Promise<void> {
   if (!env.VECTORIZE || !vectorIds.length) return;
   try {
-    await env.VECTORIZE.deleteByIds(vectorIds);
+    await withTimeout(env.VECTORIZE.deleteByIds(vectorIds), RAG_TIMEOUT_MS);
   } catch (e: any) {
     console.warn("rag.ragDeleteIdsEnv failed", { err: e?.message || e });
   }

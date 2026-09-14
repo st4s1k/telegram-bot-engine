@@ -144,11 +144,14 @@ export function asciiHeader(v: string): string {
 // "Reasoning is mandatory for this endpoint and cannot be disabled." in reply to `enabled:false`.
 const REASONING_MANDATORY_RE = /reasoning is mandatory|cannot be disabled/i;
 
+// Per-call metadata a caller may ask for (onMeta): the stream's finish_reason — "length" means the reply was
+// cut by max_tokens, so its last line is a fragment (consolidation drops it rather than applying a partial UPDATE).
+export interface LLMMeta { finishReason?: string }
 export async function callOpenRouter(
   cfg: BotConfig,
   messages: LLMMessage[],
-  { tag = "req", extraLog = {}, ctx = null, modelOverride = "", maxTokens, reasoning }: {
-    tag?: string; extraLog?: Record<string, unknown>; ctx?: Ctx | null; modelOverride?: string; maxTokens?: number; reasoning?: boolean;
+  { tag = "req", extraLog = {}, ctx = null, modelOverride = "", maxTokens, reasoning, onMeta }: {
+    tag?: string; extraLog?: Record<string, unknown>; ctx?: Ctx | null; modelOverride?: string; maxTokens?: number; reasoning?: boolean; onMeta?: (m: LLMMeta) => void;
   } = {},
 ): Promise<string> {
   const rid = newReqId();
@@ -214,7 +217,7 @@ export async function callOpenRouter(
       if (res.status === 400 && !useReasoning && REASONING_MANDATORY_RE.test(body)) {
         logLLM(cfg, tag + "_retry_reasoning", { rid, elapsed });
         llmStat({ rid, tag, model, elapsed, outcome: "retry_reasoning" });
-        return callOpenRouter(cfg, messages, { tag, extraLog, ctx, modelOverride, maxTokens, reasoning: true });
+        return callOpenRouter(cfg, messages, { tag, extraLog, ctx, modelOverride, maxTokens, reasoning: true, onMeta });
       }
       if (res.status === 402) return fb.fallbackNoCredits;
       return fb.fallbackError;
@@ -228,6 +231,7 @@ export async function callOpenRouter(
     let buffer = "";
     let content = "";
     let cost = NaN;
+    let finishReason: string | undefined;
 
     for (;;) {
       const { done, value } = await reader.read();
@@ -245,6 +249,8 @@ export async function callOpenRouter(
         if (data === "[DONE]") continue;
         let json: any;
         try { json = JSON.parse(data); } catch { continue; } // incomplete/service line — skip it
+        const fr = json?.choices?.[0]?.finish_reason;
+        if (typeof fr === "string" && fr) finishReason = fr;
         const delta = json?.choices?.[0]?.delta?.content;
         if (typeof delta === "string") content += delta;
         // usage can arrive either in the chunks or in the final object.
@@ -262,6 +268,7 @@ export async function callOpenRouter(
     logLLM(cfg, tag + "_ok", { rid, elapsed, len: content.length, cost });
     llmStat({ rid, tag, model, elapsed, outcome: "ok", cost });
     if (ctx && Number.isFinite(cost) && cost > 0) addSpend(ctx, cost);
+    try { onMeta?.({ finishReason }); } catch { /* caller's problem, never ours */ }
     return content;
   } catch (e: any) {
     const elapsed = Date.now() - startTs;
@@ -289,11 +296,11 @@ export async function runLLMWithHistory(
   history: HistoryItem[],
   userContent: string,
   msg: TgMessage,
-  { forceAppendUser = false, ctx = null, modelOverride = "", maxTokens, reasoning }: { forceAppendUser?: boolean; ctx?: Ctx | null; modelOverride?: string; maxTokens?: number; reasoning?: boolean } = {},
+  { forceAppendUser = false, ctx = null, modelOverride = "", maxTokens, reasoning, onMeta }: { forceAppendUser?: boolean; ctx?: Ctx | null; modelOverride?: string; maxTokens?: number; reasoning?: boolean; onMeta?: (m: LLMMeta) => void } = {},
 ): Promise<string> {
   const messages = toLLMMessages(systemPrompt, history, userContent, msg, { forceAppendUser, tz: cfg.timezone });
   // modelOverride empty → callOpenRouter takes cfg.openrouterModel (normal behavior).
-  return callOpenRouter(cfg, messages, { tag: "req", extraLog: { count: messages.length }, ctx, modelOverride, maxTokens, reasoning });
+  return callOpenRouter(cfg, messages, { tag: "req", extraLog: { count: messages.length }, ctx, modelOverride, maxTokens, reasoning, onMeta });
 }
 
 export function toLLMMessages(
