@@ -45,14 +45,22 @@ export function buildPhotoFromCachePrompt(desc: string, ctx: Ctx): string {
 
 // Fact-extraction prompt for long-term memory. NEUTRAL (no persona) — passed to
 // runLLMWithHistory as the system prompt directly (not via assemblePrompt). Language — from cfg.lang.
-export function buildMemoryExtractionPrompt(lang: string, existing: string[] = []): string {
+// Known facts are shown as `[id] text` so the model can reference them in UPDATE/DELETE ops.
+const knownFactLines = (known: { id: number; text: string }[]): string[] => known.map(k => `[${k.id}] ${k.text}`);
+
+export function buildMemoryExtractionPrompt(lang: string, known: { id: number; text: string }[] = []): string {
   const lines = [t(lang, "mem_extract", MEM_MAX_FACTS_PER_RUN)];
-  if (existing.length) {
-    // Inject only the RECENT facts as a dedup hint (bounds prompt tokens); parseExtractedFacts still
-    // dedups the model's OUTPUT against the FULL existing set the caller passes.
-    lines.push(t(lang, "mem_extract_known"), ...existing.slice(-40).map(f => `- ${f}`));
+  if (known.length) {
+    // The caller passes only the RECENT facts (bounds prompt tokens); ADD dedup still runs against
+    // the FULL existing set in curation.
+    lines.push(t(lang, "mem_extract_known"), ...knownFactLines(known));
   }
   return lines.join("\n");
+}
+
+// Full consolidation pass over a chat's facts (/memory consolidate): no new messages, only the list.
+export function buildMemoryConsolidationPrompt(lang: string, known: { id: number; text: string }[]): string {
+  return [t(lang, "mem_consolidate"), ...knownFactLines(known)].join("\n");
 }
 
 // Short summary of NEW chat messages (incremental). prevSummary — the previous summary,

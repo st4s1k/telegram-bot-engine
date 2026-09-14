@@ -322,10 +322,35 @@ export async function clearMemories(ctx: Ctx): Promise<void> {
   if (memIds.length) await deleteChatMemoryVectors(ctx, memIds);
 }
 
-// Delete ONE chat fact by its memories.id (row + the mem:<chatId> vector). For /memory del <N>.
-export async function deleteMemory(ctx: Ctx, memId: number): Promise<void> {
-  await ctx.env.DB.prepare("DELETE FROM memories WHERE chat_id=? AND id=?").bind(String(ctx.chatId), memId).run();
-  await deleteChatMemoryVectors(ctx, [memId]);
+// Delete ONE chat fact by its memories.id (row + the mem:<chatId> vector). For /memory del <N> and
+// the curation DELETE op. Chat-scoped: an id from another chat is a no-op. Returns whether a row went.
+export async function deleteMemory(ctx: Ctx, memId: number): Promise<boolean> {
+  const r = await ctx.env.DB.prepare("DELETE FROM memories WHERE chat_id=? AND id=?").bind(String(ctx.chatId), memId).run();
+  const changed = Number((r as any)?.meta?.changes) === 1;
+  if (changed) await deleteChatMemoryVectors(ctx, [memId]);
+  return changed;
+}
+
+// Replace the text of ONE chat fact in place (same memories.id) and re-embed it — the vector id is
+// stable (m<chatId>:<id>), so the upsert overwrites the old embedding. For the curation UPDATE op.
+// Chat-scoped. Returns false when the id is not ours, the text is empty/unchanged, or the new text
+// collides with another fact (UNIQUE(chat_id,text)) — a collision means the caller should merge (delete).
+export async function updateMemory(ctx: Ctx, memId: number, text: string): Promise<boolean> {
+  const clean = String(text ?? "").trim();
+  if (!clean) return false;
+  try {
+    const r = await ctx.env.DB.prepare(
+      "UPDATE memories SET text=? WHERE chat_id=? AND id=? AND text<>?"
+    ).bind(clean, String(ctx.chatId), memId, clean).run();
+    if (Number((r as any)?.meta?.changes) !== 1) return false;
+  } catch (e: any) {
+    // UNIQUE(chat_id, text) — the new text already exists as another fact. Not an error: the caller merges.
+    if (/unique/i.test(String(e?.message || e))) return false;
+    throw e;
+  }
+  const row = await ctx.env.DB.prepare("SELECT source FROM memories WHERE chat_id=? AND id=?").bind(String(ctx.chatId), memId).first() as any;
+  await ragUpsertMemory(ctx, { id: memId, text: clean, source: String(row?.source || "auto") });
+  return true;
 }
 
 // Deployment-wide RETENTION sweep (env RETENTION_DAYS): delete history AND facts older than cutoffMs

@@ -15,7 +15,7 @@ import { CONFIG_SCHEMA, CONFIG_PRESETS, getGlobalConfig, mergeConfig, buildHelp,
 import { fetchModelPrice, fetchOpenRouterUsage } from "./llm";
 import { sendTyping, sendAndStore, syncBotCommands } from "./telegram";
 import { runIncrementalSummary } from "./summary";
-import { runMemoryCuration } from "./curation";
+import { runMemoryCuration, consolidateMemories } from "./curation";
 import { getPersona, getPersonaStateDefaults, getAllCommands, setEngineCommands } from "./persona/registry";
 import type { RegisteredCommand } from "./persona/registry";
 import type { CommandMode, Ctx, TgMessage } from "./types";
@@ -338,6 +338,17 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
       const removed = await dedupeChatHistory(ctx);
       if (!removed) return t(lang, "mem_dedupe_none");
       return t(lang, "mem_dedupe_ok", removed);
+    }
+
+    // /memory consolidate — one LLM pass over the chat's facts: merge duplicates/paraphrases, resolve
+    // contradictions (newest wins), drop the obsolete. The maintenance tool for memory that has grown
+    // append-only for months. Works with rag off too (like /memory add). Manual facts are never touched.
+    if (sub === "consolidate" || tList(lang, "mem_sub_consolidate").includes(sub)) {
+      const r = await consolidateMemories(ctx);
+      if (!r) return t(lang, "mem_consolidate_fail");
+      if (r.total < 2) return t(lang, "mem_consolidate_few", r.total);
+      if (!r.updated && !r.deleted && !r.partial) return t(lang, "mem_consolidate_clean", r.total);
+      return t(lang, "mem_consolidate_done", r.updated, r.deleted, r.total, r.partial ? t(lang, "mem_consolidate_partial") : "");
     }
 
     // /memory size_chars [N] — show/set the history size (in characters).
