@@ -64,6 +64,32 @@ describe("callOpenRouter", () => {
     assert.equal(ctx.chatData.spendCount, 1);
   });
 
+  test("HTTP 400 'reasoning is mandatory' on enabled:false → ONE retry with exclude:true → ok", async () => {
+    // z-ai/glm-* and similar refuse enabled:false; the aux callers (summary/curation) only pass it for speed.
+    let n = 0;
+    FETCH.set("chat", () => (++n === 1
+      ? jsonResp({ error: { message: "Reasoning is mandatory for this endpoint and cannot be disabled.", code: 400 } }, { ok: false, status: 400 })
+      : sse(["ok after retry"])));
+    const out = await callOpenRouter(getGlobalConfig(makeEnv()), msgs(), { reasoning: false });
+    assert.equal(out, "ok after retry");
+    const bodies = FETCH.of("/chat/completions").map(c => c.body);
+    assert.equal(bodies.length, 2);
+    assert.deepEqual(bodies[0].reasoning, { enabled: false }); // the fast path first…
+    assert.deepEqual(bodies[1].reasoning, { exclude: true }); // …then reasoning kept but hidden
+  });
+
+  test("HTTP 400 with another message → no retry, fallback", async () => {
+    FETCH.set("chat", () => jsonResp({ error: { message: "max_tokens too large" } }, { ok: false, status: 400 }));
+    assert.equal(await callOpenRouter(getGlobalConfig(makeEnv()), msgs(), { reasoning: false }), FALLBACK_LLM_ERROR);
+    assert.equal(FETCH.of("/chat/completions").length, 1);
+  });
+
+  test("'reasoning is mandatory' while reasoning is already ON → no retry loop, fallback", async () => {
+    FETCH.set("chat", () => jsonResp({ error: { message: "Reasoning is mandatory for this endpoint and cannot be disabled." } }, { ok: false, status: 400 }));
+    assert.equal(await callOpenRouter(getGlobalConfig(makeEnv()), msgs()), FALLBACK_LLM_ERROR); // reasoning on by default
+    assert.equal(FETCH.of("/chat/completions").length, 1);
+  });
+
   test("HTTP 402 → FALLBACK_NO_CREDITS", async () => {
     const cfg = getGlobalConfig(makeEnv());
     FETCH.set("chat", () => jsonResp({ error: "no credits" }, { ok: false, status: 402 }));

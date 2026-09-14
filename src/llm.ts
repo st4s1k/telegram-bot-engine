@@ -140,6 +140,10 @@ export function asciiHeader(v: string): string {
 
 // Shared core of the OpenRouter request: headers, timeout, error handling, parsing.
 // messages — an already-assembled array (text-only or with image_url). tag — for logs.
+// Some "thinking" endpoints refuse to run without reasoning (e.g. z-ai/glm-*): HTTP 400
+// "Reasoning is mandatory for this endpoint and cannot be disabled." in reply to `enabled:false`.
+const REASONING_MANDATORY_RE = /reasoning is mandatory|cannot be disabled/i;
+
 export async function callOpenRouter(
   cfg: BotConfig,
   messages: LLMMessage[],
@@ -203,6 +207,15 @@ export async function callOpenRouter(
       const elapsed = Date.now() - startTs;
       logLLM(cfg, tag + "_err", { rid, status: res.status, elapsed, body: body.slice(0, 500) });
       llmStat({ rid, tag, model, elapsed, outcome: "http_" + res.status });
+      // The auxiliary callers (summary / fact curation / consolidation) pass reasoning:false purely for
+      // speed, never as a requirement — so when the endpoint says reasoning can't be disabled, retry
+      // ONCE with reasoning kept but excluded from the output (the same shape a normal reply uses).
+      // Bounded by construction: the retry runs with useReasoning=true and never sends enabled:false again.
+      if (res.status === 400 && !useReasoning && REASONING_MANDATORY_RE.test(body)) {
+        logLLM(cfg, tag + "_retry_reasoning", { rid, elapsed });
+        llmStat({ rid, tag, model, elapsed, outcome: "retry_reasoning" });
+        return callOpenRouter(cfg, messages, { tag, extraLog, ctx, modelOverride, maxTokens, reasoning: true });
+      }
       if (res.status === 402) return fb.fallbackNoCredits;
       return fb.fallbackError;
     }
