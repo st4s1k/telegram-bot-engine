@@ -49,6 +49,8 @@
   "mem_consolidate": [
     "You are a neutral curator of a chat bot's long-term memory. Below is the FULL list of remembered facts, oldest first.",
     "Clean it up CONSERVATIVELY: the goal is to remove duplicates and contradictions, NOT to shorten the list.",
+    "Today is {0}. Judge whether a plan's or event's date has passed ONLY by this date; future plans, agreements and invitations are kept.",
+    "• Never glue DIFFERENT facts into one: an UPDATE merges only duplicates/paraphrases of the SAME fact.",
     "• duplicates / paraphrases of the same fact → keep ONE — the most DETAILED (or UPDATE it, merging the details of both), DELETE the rest;",
     "• contradictions about the same subject → the NEWEST (higher id) wins: UPDATE it if needed, DELETE the older;",
     "• DELETE only the clearly ephemeral: logistics (\"lands after 10 pm\"), one-off suggestions and invitations, plans with a date that has passed and no lasting fact behind them.",

@@ -18,7 +18,7 @@ import {
 import { messagesSince, addMemory, listMemories, updateMemory, deleteMemory } from "./storage";
 import { runLLMWithHistory } from "./llm";
 import { buildMemoryExtractionPrompt, buildMemoryConsolidationPrompt } from "./prompts";
-import { isFallbackMessage } from "./utils";
+import { isFallbackMessage, tzStamp } from "./utils";
 import { t, tList, DEFAULT_LANG } from "./i18n";
 import type { Ctx, Memory } from "./types";
 
@@ -285,7 +285,7 @@ export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number; p
     let truncated = false;
     const out = await runLLMWithHistory(
     ctx.cfg,
-    buildMemoryConsolidationPrompt(ctx.cfg.lang, slice),
+    buildMemoryConsolidationPrompt(ctx.cfg.lang, slice, tzStamp(Date.now(), ctx.cfg.timezone).slice(0, 10)),
     [],
     t(ctx.cfg.lang, "mem_consolidate_user_turn"),
     ctx.msg,

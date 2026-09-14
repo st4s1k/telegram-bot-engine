@@ -570,3 +570,15 @@ describe("parseMemoryOps · an UPDATE that shrinks a fact is compression, not a 
     assert.deepEqual(ops.deletes, [3]);                                         // merge → delete of the twin
   });
 });
+
+describe("/memory consolidate · today's date is in the consolidation prompt", () => {
+  test("the system prompt carries YYYY-MM-DD so passed vs future plans can be told apart", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 95, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
+    await addMemory(ctx, "a", "auto"); await addMemory(ctx, "b", "auto");
+    FETCH.set("chat", () => sse(["NONE"]));
+    await runMemory(ctx, "/memory consolidate");
+    const sys = FETCH.chatBody().messages[0].content;
+    assert.match(sys, /Today is \d{4}-\d{2}-\d{2}\./);
+  });
+});

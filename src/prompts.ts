@@ -59,8 +59,10 @@ export function buildMemoryExtractionPrompt(lang: string, known: { id: number; t
 }
 
 // Full consolidation pass over a chat's facts (/memory consolidate): no new messages, only the list.
-export function buildMemoryConsolidationPrompt(lang: string, known: { id: number; text: string }[]): string {
-  return [t(lang, "mem_consolidate"), ...knownFactLines(known)].join("\n");
+// `today` (YYYY-MM-DD in the chat's timezone) lets the model judge whether a plan's date has passed — without it every
+// dated plan looks "long past" and future arrangements get deleted.
+export function buildMemoryConsolidationPrompt(lang: string, known: { id: number; text: string }[], today: string = ""): string {
+  return [t(lang, "mem_consolidate", today), ...knownFactLines(known)].join("\n");
 }
 
 // Short summary of NEW chat messages (incremental). prevSummary — the previous summary,
