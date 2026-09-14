@@ -13,7 +13,7 @@
 
 import {
   MEM_CURATION_MIN_NEW, MEM_MAX_FACTS_PER_RUN, MEM_MAX_FACT_CHARS, MEM_MAX_TOKENS,
-  MEM_KNOWN_SHOWN, MEM_CONSOLIDATE_MAX, MEM_CONSOLIDATE_MAX_TOKENS, MEM_CONSOLIDATE_TIME_BUDGET_MS,
+  MEM_KNOWN_SHOWN, MEM_CONSOLIDATE_MAX, MEM_CONSOLIDATE_MAX_TOKENS, MEM_CONSOLIDATE_TIME_BUDGET_MS, MEM_CONSOLIDATE_PARALLEL,
 } from "./constants";
 import { messagesSince, addMemory, listMemories, updateMemory, deleteMemory } from "./storage";
 import { runLLMWithHistory } from "./llm";
@@ -216,15 +216,16 @@ async function writeConsolidateCursor(env: Ctx["env"], chatId: number | string, 
 }
 
 // /memory consolidate: LOOPS over the chat's facts in windows of MEM_CONSOLIDATE_MAX (oldest first), one
-// LLM pass per window, while under the time budget — the command runs inside the Telegram webhook, so it
+// LLM pass per window — up to MEM_CONSOLIDATE_PARALLEL windows per ROUND run concurrently — while under the time budget — the command runs inside the Telegram webhook, so it
 // must answer within ~60 s. Progress is kept between invocations via the KV cursor (see above): a run that
 // hits the budget (or a mid-loop LLM failure) reports a partial pass and the next run resumes after the
 // last covered window; a run that reaches the end clears the cursor. Returns null only when NOTHING was
 // done in this invocation (the very first pass failed) — a later failure keeps the progress made.
-// budgetMs is injectable for tests.
-export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number } = {}): Promise<ConsolidateResult | null> {
+// budgetMs / parallel are injectable for tests.
+export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number; parallel?: number } = {}): Promise<ConsolidateResult | null> {
   if (ctx._preview) return null;
   const budgetMs = opts.budgetMs ?? MEM_CONSOLIDATE_TIME_BUDGET_MS;
+  const parallel = Math.max(1, opts.parallel ?? MEM_CONSOLIDATE_PARALLEL);
   const all = toKnown(await listMemories(ctx.env, ctx.chatId));
   const total = all.length;
   if (total < 2) return { added: 0, updated: 0, deleted: 0, total, checked: total, passes: 0, partial: false };
@@ -234,32 +235,39 @@ export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number } 
   if (start < 0) start = 0; // a stale cursor past the newest fact → start over from the oldest
 
   const t0 = Date.now();
-  let passes = 0, updated = 0, deleted = 0, lastPassMs = 0;
-  while (start < total) {
-    // Never start a pass that (judging by the previous one) would overrun the budget; the first always runs.
-    if (passes > 0 && Date.now() - t0 + lastPassMs >= budgetMs) break;
-    const slice = all.slice(start, start + MEM_CONSOLIDATE_MAX);
-    const p0 = Date.now();
-    const out = await runLLMWithHistory(
-      ctx.cfg,
-      buildMemoryConsolidationPrompt(ctx.cfg.lang, slice),
-      [],
-      t(ctx.cfg.lang, "mem_consolidate_user_turn"),
-      ctx.msg,
-      { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel, maxTokens: MEM_CONSOLIDATE_MAX_TOKENS, reasoning: false }
-    );
-    lastPassMs = Date.now() - p0;
-    if (isFallbackMessage(out)) {
-      if (passes === 0) return null; // nothing achieved in this invocation → report the failure
-      break;                         // keep what was done; the cursor below lets the next run resume
+  let passes = 0, updated = 0, deleted = 0, lastRoundMs = 0, failed = false;
+  const passOver = (slice: KnownFact[]): Promise<string> => runLLMWithHistory(
+    ctx.cfg,
+    buildMemoryConsolidationPrompt(ctx.cfg.lang, slice),
+    [],
+    t(ctx.cfg.lang, "mem_consolidate_user_turn"),
+    ctx.msg,
+    { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel, maxTokens: MEM_CONSOLIDATE_MAX_TOKENS, reasoning: false }
+  );
+  while (start < total && !failed) {
+    // Never start a round that (judging by the previous one) would overrun the budget; the first always runs.
+    if (passes > 0 && Date.now() - t0 + lastRoundMs >= budgetMs) break;
+    // One ROUND = up to parallel windows whose LLM passes run CONCURRENTLY — windows are independent
+    // (ops may only reference the ids shown in their own window), so a round costs the time of its
+    // slowest pass, not the sum. Ops are applied in window order afterwards.
+    const windows: KnownFact[][] = [];
+    for (let s = start; s < total && windows.length < parallel; s += MEM_CONSOLIDATE_MAX) windows.push(all.slice(s, s + MEM_CONSOLIDATE_MAX));
+    const r0 = Date.now();
+    const outs = await Promise.all(windows.map(passOver));
+    lastRoundMs = Date.now() - r0;
+    for (let w = 0; w < windows.length; w++) {
+      if (isFallbackMessage(outs[w])) { failed = true; continue; } // this window is redone next run
+      // A consolidation pass rewrites what exists; it is not a place to invent new facts.
+      const ops = parseMemoryOps(outs[w], windows[w], ctx.cfg.lang, 0);
+      const res = await applyMemoryOps(ctx, ops);
+      updated += res.updated; deleted += res.deleted; passes++;
+      // The cursor must stay CONTIGUOUS: a window after a failed one is still applied (its ops are safe and
+      // already paid for) but does not advance \`start\` — it gets re-checked from the cursor next time.
+      if (!failed) start += windows[w].length;
     }
-    // A consolidation pass rewrites what exists; it is not a place to invent new facts.
-    const ops = parseMemoryOps(out, slice, ctx.cfg.lang, 0);
-    const res = await applyMemoryOps(ctx, ops);
-    updated += res.updated; deleted += res.deleted; passes++;
-    start += slice.length;
   }
+  if (passes === 0) return null; // nothing achieved in this invocation → report the failure
   const partial = start < total;
-  await writeConsolidateCursor(ctx.env, ctx.chatId, partial ? all[start - 1].id : 0);
+  await writeConsolidateCursor(ctx.env, ctx.chatId, partial && start > 0 ? all[start - 1].id : 0); // start=0 → no contiguous progress → no cursor
   return { added: 0, updated, deleted, total, checked: start, passes, partial };
 }

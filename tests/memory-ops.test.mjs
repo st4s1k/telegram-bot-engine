@@ -397,16 +397,48 @@ describe("/memory consolidate · loops over windows, resumes from the KV cursor"
     assert.ok(!env._kv.store.has(CURSOR(77)));
   });
 
-  test("time budget: with budgetMs=0 exactly one pass runs, the rest is left for the next run", async () => {
+  test("time budget: with budgetMs=0 and parallel=1 exactly one round of one pass runs; the rest is left for the next run", async () => {
     const env = ragEnv();
     const ctx = makeCtxFor(makeMsg({ chatId: 78, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
     const ids = await seed45(ctx);
     FETCH.set("chat", () => sse(["NONE"]));
-    const r = await consolidateMemories(ctx, { budgetMs: 0 });
+    const r = await consolidateMemories(ctx, { budgetMs: 0, parallel: 1 });
     assert.equal(r.passes, 1);
     assert.equal(r.checked, 40);
     assert.equal(r.partial, true);
     assert.equal(env._kv.store.get(CURSOR(78)), String(ids[39]));
+  });
+
+  test("windows of one round run CONCURRENTLY: both windows are in flight before either answers", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 80, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
+    await seed45(ctx);
+    let inFlight = 0, maxInFlight = 0;
+    FETCH.set("chat", async () => {
+      inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise(r => setTimeout(r, 20)); // both passes overlap here
+      inFlight--;
+      return sse(["NONE"]);
+    });
+    const r = await consolidateMemories(ctx, { budgetMs: 0 }); // budget 0 still runs the FIRST round in full
+    assert.equal(maxInFlight, 2);                                // 45 facts = 2 windows, run together
+    assert.equal(r.passes, 2);
+    assert.equal(r.checked, 45);
+    assert.equal(r.partial, false);
+  });
+
+  test("a failed window does not block the later windows of its round; the cursor stays contiguous", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 81, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
+    const ids = await seed45(ctx);
+    let n = 0;
+    FETCH.set("chat", () => (++n === 1 ? sse([], { ok: false, status: 500 }) : sse([`DELETE ${ids[44]}`])));
+    const r = await consolidateMemories(ctx);
+    assert.equal(r.passes, 1);                                  // window 2 succeeded and was applied…
+    assert.equal((await dbMemories(env, 81)).length, 44);
+    assert.equal(r.checked, 0);                                 // …but window 1 failed → cursor stays at the start
+    assert.equal(r.partial, true);
+    assert.ok(!env._kv.store.has(CURSOR(81)));                  // cursor 0 → no key (start over next time)
   });
 
   test("a stale cursor past the newest fact → the run starts over from the oldest", async () => {
