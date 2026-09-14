@@ -343,12 +343,24 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
     // /memory consolidate — one LLM pass over the chat's facts: merge duplicates/paraphrases, resolve
     // contradictions (newest wins), drop the obsolete. The maintenance tool for memory that has grown
     // append-only for months. Works with rag off too (like /memory add). Manual facts are never touched.
-    if (sub === "consolidate" || tList(lang, "mem_sub_consolidate").includes(sub)) {
-      const r = await consolidateMemories(ctx);
+    // `/memory consolidate dry` (aliases in mem_sub_consolidate_dry) = a PREVIEW: the same LLM passes, the
+    // reply shows what WOULD be deleted/updated, nothing is written and the cursor stays put.
+    const cParts = raw.split(/\s+/);
+    const cHead = (cParts[0] || "").toLowerCase();
+    const cArg = (cParts[1] || "").toLowerCase();
+    if (cHead === "consolidate" || tList(lang, "mem_sub_consolidate").includes(cHead)) {
+      const dryRun = cArg === "dry" || tList(lang, "mem_sub_consolidate_dry").includes(cArg);
+      const r = await consolidateMemories(ctx, { dryRun });
       if (!r) return t(lang, "mem_consolidate_fail");
       if (r.total < 2) return t(lang, "mem_consolidate_few", r.total);
       if (!r.updated && !r.deleted && !r.partial) return t(lang, "mem_consolidate_clean", r.total);
-      return t(lang, "mem_consolidate_done", r.updated, r.deleted, r.total, r.checked, r.passes, r.partial ? t(lang, "mem_consolidate_partial") : "");
+      const head = t(lang, r.dryRun ? "mem_consolidate_dry" : "mem_consolidate_done", r.updated, r.deleted, r.total, r.checked, r.passes, r.partial ? t(lang, "mem_consolidate_partial") : "");
+      // The diff: deleted facts (text) and updates (was ⟶ now) — a reviewable list instead of 250 rows.
+      const lines: string[] = [head];
+      if (r.diff.deleted.length) { lines.push("", t(lang, "mem_consolidate_diff_deleted")); for (const d of r.diff.deleted) lines.push("— " + d.text); }
+      if (r.diff.updated.length) { lines.push("", t(lang, "mem_consolidate_diff_updated")); for (const u of r.diff.updated) lines.push("— " + u.from + " ⟶ " + u.to); }
+      if (r.diff.more) lines.push(t(lang, "mem_consolidate_diff_more", r.diff.more));
+      return lines.join("\n");
     }
 
     // /memory size_chars [N] — show/set the history size (in characters).

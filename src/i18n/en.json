@@ -107,6 +107,10 @@
   "mem_consolidate_clean": "🧹 Memory is already tidy — nothing to consolidate ({0} facts).",
   "mem_consolidate_few": "🧹 Too few facts to consolidate ({0}).",
   "mem_consolidate_fail": "⚠️ Couldn't consolidate: the model didn't answer. Try again later.",
+  "mem_consolidate_dry": "🔎 Dry run — nothing changed. Would be: updated {0}, deleted {1} (of {2} facts) — checked {3}, passes: {4}{5}",
+  "mem_consolidate_diff_deleted": "🗑 Deleted:",
+  "mem_consolidate_diff_updated": "✏️ Updated (was ⟶ now):",
+  "mem_consolidate_diff_more": "…and {0} more (not shown)",
   "mem_size_show": "📏 Memory size: {0} chars.\nSet: `/memory size_chars 8000`",
   "mem_status": [
     "🧠 *Chat memory*",

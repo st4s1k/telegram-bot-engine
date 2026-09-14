@@ -13,7 +13,7 @@
 
 import {
   MEM_CURATION_MIN_NEW, MEM_MAX_FACTS_PER_RUN, MEM_MAX_FACT_CHARS, MEM_MAX_TOKENS,
-  MEM_KNOWN_SHOWN, MEM_CONSOLIDATE_MAX, MEM_CONSOLIDATE_MAX_TOKENS, MEM_CONSOLIDATE_TIME_BUDGET_MS, MEM_CONSOLIDATE_PARALLEL, MEM_CONSOLIDATE_ROUND_FLOOR_MS, MEM_APPLY_PARALLEL,
+  MEM_KNOWN_SHOWN, MEM_CONSOLIDATE_MAX, MEM_CONSOLIDATE_MAX_TOKENS, MEM_CONSOLIDATE_TIME_BUDGET_MS, MEM_CONSOLIDATE_PARALLEL, MEM_CONSOLIDATE_ROUND_FLOOR_MS, MEM_APPLY_PARALLEL, MEM_CONSOLIDATE_DIFF_MAX,
 } from "./constants";
 import { messagesSince, addMemory, listMemories, updateMemory, deleteMemory } from "./storage";
 import { runLLMWithHistory } from "./llm";
@@ -207,6 +207,15 @@ export interface ConsolidateResult extends ApplyResult {
   checked: number; // facts covered so far, counting from the oldest (== total when the pass is complete)
   passes: number;  // LLM passes made in THIS invocation
   partial: boolean;
+  /** what was (or, in a dry run, would be) changed — capped at MEM_CONSOLIDATE_DIFF_MAX entries in total */
+  diff: ConsolidateDiff;
+  /** dry run: nothing written, cursor untouched */
+  dryRun: boolean;
+}
+export interface ConsolidateDiff {
+  deleted: { id: number; text: string }[];
+  updated: { id: number; from: string; to: string }[];
+  more: number; // entries beyond the cap
 }
 
 // The resume cursor: the id of the last fact covered by a previous invocation. Kept in KV (best-effort,
@@ -250,13 +259,16 @@ async function settleWithin<T>(promises: Promise<T>[], deadlineMs: number): Prom
   });
   return results;
 }
-export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number; parallel?: number; roundMs?: number } = {}): Promise<ConsolidateResult | null> {
+export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number; parallel?: number; roundMs?: number; dryRun?: boolean } = {}): Promise<ConsolidateResult | null> {
   if (ctx._preview) return null;
   const budgetMs = opts.budgetMs ?? MEM_CONSOLIDATE_TIME_BUDGET_MS;
   const parallel = Math.max(1, opts.parallel ?? MEM_CONSOLIDATE_PARALLEL);
+  const dryRun = !!opts.dryRun;
+  const diff: ConsolidateDiff = { deleted: [], updated: [], more: 0 };
+  const emptyDiff = (): ConsolidateDiff => ({ deleted: [], updated: [], more: 0 });
   const all = toKnown(await listMemories(ctx.env, ctx.chatId));
   const total = all.length;
-  if (total < 2) return { added: 0, updated: 0, deleted: 0, total, checked: total, passes: 0, partial: false };
+  if (total < 2) return { added: 0, updated: 0, deleted: 0, total, checked: total, passes: 0, partial: false, diff: emptyDiff(), dryRun };
 
   const cursor = await readConsolidateCursor(ctx.env, ctx.chatId);
   let start = cursor > 0 ? all.findIndex(k => k.id > cursor) : 0;
@@ -301,8 +313,17 @@ export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number; p
       if (out === undefined || isFallbackMessage(out)) { failed = true; continue; } // failed or not settled in time → redone next run
       // A consolidation pass rewrites what exists; it is not a place to invent new facts.
       const ops = parseMemoryOps(out, windows[w], ctx.cfg.lang, 0);
-      const res = await applyMemoryOps(ctx, ops);
-      updated += res.updated; deleted += res.deleted; passes++;
+      // Record the diff (texts come from the window the model saw) — the reply shows WHAT changed, so a
+      // human reviews a short diff instead of the whole list. A dry run stops here: counts, no writes.
+      const byId = new Map(windows[w].map(k => [k.id, k]));
+      const room = () => diff.deleted.length + diff.updated.length < MEM_CONSOLIDATE_DIFF_MAX;
+      for (const id of ops.deletes) { if (room()) diff.deleted.push({ id, text: byId.get(id)?.text ?? "" }); else diff.more++; }
+      for (const u of ops.updates) { if (room()) diff.updated.push({ id: u.id, from: byId.get(u.id)?.text ?? "", to: u.text }); else diff.more++; }
+      if (dryRun) { updated += ops.updates.length; deleted += ops.deletes.length; passes++; }
+      else {
+        const res = await applyMemoryOps(ctx, ops);
+        updated += res.updated; deleted += res.deleted; passes++;
+      }
       // The cursor must stay CONTIGUOUS: a window after a failed one is still applied (its ops are safe and
       // already paid for) but does not advance \`start\` — it gets re-checked from the cursor next time.
       if (!failed) start += windows[w].length;
@@ -310,6 +331,6 @@ export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number; p
   }
   if (passes === 0) return null; // nothing achieved in this invocation → report the failure
   const partial = start < total;
-  await writeConsolidateCursor(ctx.env, ctx.chatId, partial && start > 0 ? all[start - 1].id : 0); // start=0 → no contiguous progress → no cursor
-  return { added: 0, updated, deleted, total, checked: start, passes, partial };
+  if (!dryRun) await writeConsolidateCursor(ctx.env, ctx.chatId, partial && start > 0 ? all[start - 1].id : 0); // start=0 → no contiguous progress → no cursor; a dry run never moves it
+  return { added: 0, updated, deleted, total, checked: start, passes, partial, diff, dryRun };
 }

@@ -532,3 +532,31 @@ describe("applyMemoryOps · concurrency", () => {
     assert.equal((await dbMemories(env, 90)).length, 0);
   });
 });
+
+describe("/memory consolidate · dry run · preview + diff in the reply", () => {
+  test("dry: reply lists what WOULD be deleted/updated, nothing is written, no cursor", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 93, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
+    const a = await addMemory(ctx, "Vasya drives a taxi", "auto");
+    const b = await addMemory(ctx, "Vasya is a taxi driver", "auto");
+    FETCH.set("chat", () => sse([`UPDATE ${a}: Vasya drives a taxi (since March)\nDELETE ${b}`]));
+    const out = await runMemory(ctx, "/memory consolidate dry");
+    assert.match(out, /Dry run/);
+    assert.match(out, /updated 1, deleted 1/);
+    assert.ok(out.includes("Vasya is a taxi driver"));                        // deleted text shown
+    assert.ok(out.includes("Vasya drives a taxi ⟶ Vasya drives a taxi (since March)")); // was ⟶ now
+    assert.deepEqual((await dbMemories(env, 93)).map(r => r.text), ["Vasya drives a taxi", "Vasya is a taxi driver"]); // untouched
+    assert.ok(!env._kv.store.has("consolidate:93"));
+  });
+  test("real run: the reply carries the same diff and the changes are applied", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 94, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
+    await addMemory(ctx, "keep", "auto");
+    const b = await addMemory(ctx, "drop me", "auto");
+    FETCH.set("chat", () => sse([`DELETE ${b}`]));
+    const out = await runMemory(ctx, "/memory consolidate");
+    assert.match(out, /Memory consolidated: updated 0, deleted 1/);
+    assert.ok(out.includes("Deleted:") && out.includes("drop me"));
+    assert.deepEqual((await dbMemories(env, 94)).map(r => r.text), ["keep"]);
+  });
+});
