@@ -47,17 +47,15 @@
   ],
   "mem_extract_known": "Already known (reference by [id] for UPDATE/DELETE; do NOT ADD these again):",
   "mem_consolidate": [
-    "You are a neutral curator of a chat bot's long-term memory. Below is the FULL list of remembered facts, oldest first.",
-    "Clean it up CONSERVATIVELY: the goal is to remove duplicates and contradictions, NOT to shorten the list.",
-    "Today is {0}. Judge whether a plan's or event's date has passed ONLY by this date; future plans, agreements and invitations are kept.",
-    "• Never glue DIFFERENT facts into one: an UPDATE merges only duplicates/paraphrases of the SAME fact.",
-    "• duplicates / paraphrases of the same fact → keep ONE — the most DETAILED (or UPDATE it, merging the details of both), DELETE the rest;",
-    "• contradictions about the same subject → the NEWEST (higher id) wins: UPDATE it if needed, DELETE the older;",
-    "• DELETE only the clearly ephemeral: logistics (\"lands after 10 pm\"), one-off suggestions and invitations, plans with a date that has passed and no lasting fact behind them.",
-    "• Old ≠ obsolete. Biography, childhood, habits, preferences, health, possessions, relationships, where someone lived or has been — STABLE facts: never delete or shorten them, however old.",
-    "• UPDATE is only for a change of meaning or for merging duplicates. An UPDATE's text is a pure fact: no comments, notes or parenthetical remarks of your own. Do not reword, shorten or \"polish\". When in doubt, leave it alone.",
+    "You are a neutral curator of a chat bot's long-term memory. Below is the FULL list of remembered facts, oldest first. Today is {0}.",
+    "The memory is VECTOR-based: a reply only recalls the facts semantically close to the question, so there is no such thing as a \"superfluous\" fact — the ONLY harm comes from duplicates (they crowd the recall) and contradictions (the model cannot tell which is newer).",
+    "Your job is exactly those two things. Delete nothing for being \"stale\", \"old\" or \"trivial\": one-off events, logistics, plans, jokes all stay.",
+    "• duplicates / paraphrases of the SAME fact → keep ONE — the most DETAILED (or UPDATE it, merging the details of all), DELETE the rest;",
+    "• a contradiction about the same thing (the fact changed: \"plans to\" → \"did\", \"works at\" → \"was fired\") → UPDATE the newer fact so it states the current state (it may mention the former one), DELETE the older;",
+    "• Never glue DIFFERENT facts into one. UPDATE is only for a change of meaning or for merging duplicates; its text is a pure fact — no comments, notes or parenthetical remarks of your own. Do not reword, shorten or \"polish\".",
+    "When unsure whether it is a duplicate or a contradiction — leave it alone.",
     "Reply with operations, one per line: UPDATE <id>: <fact> or DELETE <id>. Refer to facts ONLY by the [id] shown.",
-    "If the list is already clean — reply with the single word NONE."
+    "If there are no duplicates and no contradictions — reply with the single word NONE."
   ],
   "mem_consolidate_user_turn": "Consolidate the facts above.",
 
