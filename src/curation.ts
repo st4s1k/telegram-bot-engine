@@ -13,7 +13,7 @@
 
 import {
   MEM_CURATION_MIN_NEW, MEM_MAX_FACTS_PER_RUN, MEM_MAX_FACT_CHARS, MEM_MAX_TOKENS,
-  MEM_KNOWN_SHOWN, MEM_CONSOLIDATE_MAX, MEM_CONSOLIDATE_MAX_TOKENS, MEM_CONSOLIDATE_TIME_BUDGET_MS, MEM_CONSOLIDATE_PARALLEL, MEM_CONSOLIDATE_ROUND_FLOOR_MS, MEM_APPLY_PARALLEL, MEM_CONSOLIDATE_DIFF_MAX,
+  MEM_KNOWN_SHOWN, MEM_CONSOLIDATE_MAX, MEM_CONSOLIDATE_MAX_TOKENS, MEM_CONSOLIDATE_TIME_BUDGET_MS, MEM_CONSOLIDATE_PARALLEL, MEM_CONSOLIDATE_ROUND_FLOOR_MS, MEM_APPLY_PARALLEL, MEM_CONSOLIDATE_DIFF_MAX, MEM_UPDATE_MIN_RATIO,
 } from "./constants";
 import { messagesSince, addMemory, listMemories, updateMemory, deleteMemory } from "./storage";
 import { runLLMWithHistory } from "./llm";
@@ -105,6 +105,9 @@ export function parseMemoryOps(
       touched.add(id);
       if (key === normKey(k.text)) continue;      // no-op: same text
       if (seen.has(key)) { ops.deletes.push(id); continue; } // MERGE into the existing twin
+      // An UPDATE that shrinks a fact to less than half its length is compression, not a correction (the model
+      // dropping dosages, names, details) — skip it; the original stays intact. A genuine rewording keeps the substance.
+      if (text.length < k.text.length * MEM_UPDATE_MIN_RATIO) continue;
       seen.add(key);
       ops.updates.push({ id, text });
       continue;

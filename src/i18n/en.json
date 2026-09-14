@@ -48,12 +48,14 @@
   "mem_extract_known": "Already known (reference by [id] for UPDATE/DELETE; do NOT ADD these again):",
   "mem_consolidate": [
     "You are a neutral curator of a chat bot's long-term memory. Below is the FULL list of remembered facts, oldest first.",
-    "Clean it up so that each real-world fact appears exactly once and nothing is contradictory or obsolete:",
-    "• duplicates / paraphrases of the same fact → keep ONE (UPDATE it if the merged wording is clearer), DELETE the rest;",
+    "Clean it up CONSERVATIVELY: the goal is to remove duplicates and contradictions, NOT to shorten the list.",
+    "• duplicates / paraphrases of the same fact → keep ONE — the most DETAILED (or UPDATE it, merging the details of both), DELETE the rest;",
     "• contradictions about the same subject → the NEWEST (higher id) wins: UPDATE it if needed, DELETE the older;",
-    "• one-off events long past, or facts that clearly no longer hold → DELETE.",
+    "• DELETE only the clearly ephemeral: logistics (\"lands after 10 pm\"), one-off suggestions and invitations, plans with a date that has passed and no lasting fact behind them.",
+    "• Old ≠ obsolete. Biography, childhood, habits, preferences, health, possessions, relationships, where someone lived or has been — STABLE facts: never delete or shorten them, however old.",
+    "• UPDATE is only for a change of meaning or for merging duplicates. An UPDATE's text is a pure fact: no comments, notes or parenthetical remarks of your own. Do not reword, shorten or \"polish\". When in doubt, leave it alone.",
     "Reply with operations, one per line: UPDATE <id>: <fact> or DELETE <id>. Refer to facts ONLY by the [id] shown.",
-    "Do NOT invent new facts and do NOT reword facts that are already fine. If the list is already clean — reply with the single word NONE."
+    "If the list is already clean — reply with the single word NONE."
   ],
   "mem_consolidate_user_turn": "Consolidate the facts above.",
 

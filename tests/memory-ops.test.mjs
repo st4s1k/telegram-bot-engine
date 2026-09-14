@@ -560,3 +560,13 @@ describe("/memory consolidate · dry run · preview + diff in the reply", () => 
     assert.deepEqual((await dbMemories(env, 94)).map(r => r.text), ["keep"]);
   });
 });
+
+describe("parseMemoryOps · an UPDATE that shrinks a fact is compression, not a correction", () => {
+  test("shrinking below half the length is skipped; a same-size rewording and a merge still work", () => {
+    const long = "Стас принимает фенибут по назначению врача (500 мг утром и 500 мг в обед), плюс глицин и 3 мг мелатонина перед сном.";
+    const known = [K(1, long), K(2, "Лиза любит сыр"), K(3, "Лиза обожает сыр")];
+    const ops = parseMemoryOps(`UPDATE 1: Стас принимает фенибут, глицин и мелатонин.\nUPDATE 2: Лиза любит сыр (очень)\nUPDATE 3: Лиза любит сыр`, known, "en", 0);
+    assert.deepEqual(ops.updates, [{ id: 2, text: "Лиза любит сыр (очень)" }]); // 1 skipped (shrunk), 3 merged
+    assert.deepEqual(ops.deletes, [3]);                                         // merge → delete of the twin
+  });
+});
