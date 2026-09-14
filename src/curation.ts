@@ -13,7 +13,7 @@
 
 import {
   MEM_CURATION_MIN_NEW, MEM_MAX_FACTS_PER_RUN, MEM_MAX_FACT_CHARS, MEM_MAX_TOKENS,
-  MEM_KNOWN_SHOWN, MEM_CONSOLIDATE_MAX, MEM_CONSOLIDATE_MAX_TOKENS, MEM_CONSOLIDATE_TIME_BUDGET_MS, MEM_CONSOLIDATE_PARALLEL,
+  MEM_KNOWN_SHOWN, MEM_CONSOLIDATE_MAX, MEM_CONSOLIDATE_MAX_TOKENS, MEM_CONSOLIDATE_TIME_BUDGET_MS, MEM_CONSOLIDATE_PARALLEL, MEM_CONSOLIDATE_ROUND_FLOOR_MS,
 } from "./constants";
 import { messagesSince, addMemory, listMemories, updateMemory, deleteMemory } from "./storage";
 import { runLLMWithHistory } from "./llm";
@@ -221,8 +221,25 @@ async function writeConsolidateCursor(env: Ctx["env"], chatId: number | string, 
 // hits the budget (or a mid-loop LLM failure) reports a partial pass and the next run resumes after the
 // last covered window; a run that reaches the end clears the cursor. Returns null only when NOTHING was
 // done in this invocation (the very first pass failed) — a later failure keeps the progress made.
-// budgetMs / parallel are injectable for tests.
-export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number; parallel?: number } = {}): Promise<ConsolidateResult | null> {
+// budgetMs / parallel / roundMs are injectable for tests.
+// Wait for the passes of a round, but not past `deadlineMs`: one stuck stream (a provider hiccup that only
+// ends at LLM_TIMEOUT_MS) must not hold the whole round — and the Telegram webhook — hostage. A pass that
+// has not settled by the deadline counts as failed for THIS run (its window is re-checked from the cursor
+// next time); the underlying request still ends on its own timers, its late result is simply dropped.
+async function settleWithin<T>(promises: Promise<T>[], deadlineMs: number): Promise<(T | undefined)[]> {
+  const results: (T | undefined)[] = new Array(promises.length).fill(undefined);
+  let pending = promises.length;
+  if (!pending) return results;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, Math.max(0, deadlineMs));
+    promises.forEach((p, i) => p.then(
+      (v) => { results[i] = v; },
+      () => { results[i] = undefined; },
+    ).finally(() => { if (--pending === 0) { clearTimeout(timer); resolve(); } }));
+  });
+  return results;
+}
+export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number; parallel?: number; roundMs?: number } = {}): Promise<ConsolidateResult | null> {
   if (ctx._preview) return null;
   const budgetMs = opts.budgetMs ?? MEM_CONSOLIDATE_TIME_BUDGET_MS;
   const parallel = Math.max(1, opts.parallel ?? MEM_CONSOLIDATE_PARALLEL);
@@ -253,12 +270,16 @@ export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number; p
     const windows: KnownFact[][] = [];
     for (let s = start; s < total && windows.length < parallel; s += MEM_CONSOLIDATE_MAX) windows.push(all.slice(s, s + MEM_CONSOLIDATE_MAX));
     const r0 = Date.now();
-    const outs = await Promise.all(windows.map(passOver));
+    // The round may run until the budget is spent (never less than a floor, so a fast model always gets a
+    // fair chance) — a window still in flight after that is treated as failed for this run.
+    const deadline = opts.roundMs ?? Math.max(MEM_CONSOLIDATE_ROUND_FLOOR_MS, budgetMs - (Date.now() - t0));
+    const outs = await settleWithin(windows.map(passOver), deadline);
     lastRoundMs = Date.now() - r0;
     for (let w = 0; w < windows.length; w++) {
-      if (isFallbackMessage(outs[w])) { failed = true; continue; } // this window is redone next run
+      const out = outs[w];
+      if (out === undefined || isFallbackMessage(out)) { failed = true; continue; } // failed or not settled in time → redone next run
       // A consolidation pass rewrites what exists; it is not a place to invent new facts.
-      const ops = parseMemoryOps(outs[w], windows[w], ctx.cfg.lang, 0);
+      const ops = parseMemoryOps(out, windows[w], ctx.cfg.lang, 0);
       const res = await applyMemoryOps(ctx, ops);
       updated += res.updated; deleted += res.deleted; passes++;
       // The cursor must stay CONTIGUOUS: a window after a failed one is still applied (its ops are safe and

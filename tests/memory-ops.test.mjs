@@ -452,3 +452,25 @@ describe("/memory consolidate · loops over windows, resumes from the KV cursor"
     assert.ok(!env._kv.store.has(CURSOR(79)));
   });
 });
+
+describe("/memory consolidate · round deadline", () => {
+  test("a stuck window does not hold the round: the settled windows are applied and the reply is on time", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 82, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
+    const ids = [];
+    for (let i = 0; i < 45; i++) ids.push(await addMemory(ctx, "fact " + i, "auto"));
+    let n = 0;
+    FETCH.set("chat", async () => {
+      if (++n === 1) return sse([`DELETE ${ids[3]}`]);                      // window 1: fast
+      await new Promise(r => setTimeout(r, 400)); return sse(["NONE"]);   // window 2: stuck past the deadline
+    });
+    const t0 = Date.now();
+    const r = await consolidateMemories(ctx, { budgetMs: 0, roundMs: 100 });
+    assert.ok(Date.now() - t0 < 350, "the round ended at the deadline, not when the stuck window finished");
+    assert.equal(r.passes, 1);                                   // window 1 applied…
+    assert.equal((await dbMemories(env, 82)).length, 44);
+    assert.equal(r.checked, 40);                                 // …window 2 is left for the next run
+    assert.equal(r.partial, true);
+    assert.equal(env._kv.store.get("consolidate:82"), String(ids[39]));
+  });
+});

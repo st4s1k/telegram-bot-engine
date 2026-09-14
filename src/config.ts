@@ -259,7 +259,8 @@ export function setConfigParam(ctx: Ctx, key: string, rawVal: string): string {
   }
   // model / vision_model / summary_model flow into the OpenRouter URL path + request body — require an
   // "author/slug"-ish shape so junk is rejected with a clean error instead of an odd outbound request.
-  if (["model", "vision_model", "summary_model"].includes(key) && parsed.value && !/^[\w.@:\/-]+$/.test(String(parsed.value))) {
+  // A leading `~` is allowed: OpenRouter prefixes its rolling "latest" aliases with it (e.g. ~deepseek/deepseek-flash-latest).
+  if (["model", "vision_model", "summary_model"].includes(key) && parsed.value && !/^~?[\w.@:\/-]+$/.test(String(parsed.value))) {
     return t(lang, "cfg_set_error", t(lang, "cfg_err_model"), key);
   }
   // `timezone` must be a valid IANA id — otherwise the Intl formatter silently falls back to UTC.

@@ -490,3 +490,15 @@ describe("summary: «previous summary» deep-link + pointer", () => {
 });
 
 
+
+
+describe("model ids: OpenRouter rolling aliases", () => {
+  test("a ~-prefixed alias is accepted by /model summary; junk is still rejected", async () => {
+    const ctx = makeCtxFor(makeMsg(), makeEnv());
+    await COMMANDS.model(ctx, { argText: "summary ~deepseek/deepseek-flash-latest" });
+    assert.equal(ctx.chatData.config.summary_model, "~deepseek/deepseek-flash-latest");
+    const out = await COMMANDS.model(ctx, { argText: "summary not a model id" });
+    assert.ok(out.includes("⚠️"));                                          // rejected (locale-independent marker)
+    assert.equal(ctx.chatData.config.summary_model, "~deepseek/deepseek-flash-latest"); // unchanged
+  });
+});
