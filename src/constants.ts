@@ -35,8 +35,14 @@ export const RAG_TIMEOUT_MS = 8_000;       // ceiling on waiting for embed/query
 export const MEM_CURATION_MIN_NEW = 2;     // don't run extraction while there are fewer new messages
 export const MEM_MAX_FACTS_PER_RUN = 5;    // maximum facts per single extraction pass
 export const MEM_MAX_FACT_CHARS = 300;     // truncate the length of a single fact
-export const MEM_MAX_TOKENS = 500;         // response cap for fact extraction (auxiliary call — a handful of short ops)
+// NOTE on the auxiliary caps below: on "thinking" endpoints that refuse reasoning:{enabled:false} (z-ai/glm-*),
+// callOpenRouter retries with reasoning kept, and most providers count the reasoning tokens AGAINST max_tokens.
+// A cap sized for "a handful of short ops" then starves the visible output (finish:length with little or no
+// content → treated as an empty reply → fallback). The caps are ceilings, not targets — a non-thinking model
+// stops when it is done — so they are sized to leave room for reasoning.
+export const MEM_MAX_TOKENS = 1500;        // response cap for fact extraction (auxiliary call; was 500 — starved on thinking models)
 export const MEM_KNOWN_SHOWN = 40;         // how many recent known facts the extractor is shown (and may UPDATE/DELETE)
-export const MEM_CONSOLIDATE_MAX = 120;    // facts covered by ONE /memory consolidate pass (oldest first; more → partial)
-export const MEM_CONSOLIDATE_MAX_TOKENS = 1500; // response cap for the consolidation pass (may emit many ops)
-export const SUMMARY_MAX_TOKENS = 1000;    // response cap for the /summary digest (auxiliary call)
+export const MEM_CONSOLIDATE_MAX = 40;     // facts covered by ONE /memory consolidate pass (oldest first; more → partial). 40, not 120: a
+                                            // thinking model over 120 facts ran past the 50 s webhook ceiling (LLM_TIMEOUT_MS) — passes repeat anyway
+export const MEM_CONSOLIDATE_MAX_TOKENS = 3000; // response cap for the consolidation pass (≤ ~800 tokens of ops for 40 facts + room for reasoning)
+export const SUMMARY_MAX_TOKENS = 2000;    // response cap for the /summary digest (auxiliary call; was 1000 — see the NOTE above)
