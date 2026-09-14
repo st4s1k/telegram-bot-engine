@@ -36,8 +36,10 @@ export interface ApplyResult { added: number; updated: number; deleted: number }
 export interface KnownFact { id: number; text: string; source: string }
 
 const RE_ADD    = /^add\s*:\s*(.*)$/i;
-const RE_UPDATE = /^update\s+(\d+)\s*:\s*(.*)$/i;
-const RE_DELETE = /^delete\s+(\d+)\s*$/i;
+// The model may echo ids the way it saw them — `[182]` — or as `#182`; DELETE may list several ids.
+const RE_UPDATE = /^update\s+#?\[?\s*(\d+)\s*\]?\s*:\s*(.*)$/i;
+const RE_DELETE = /^delete\s+([#\[\]\d,\s]+)$/i; // ids extracted with /\d+/g
+const RE_OP_WORD = /^(?:delete|update)\b/i;         // a protocol line that failed to parse must never become an ADD
 
 // Normalize one candidate fact line: strip a real list marker, drop headings/refusals, cap length.
 // Returns "" when the line carries no fact. Shared by the plain-line (ADD) path and UPDATE texts.
@@ -84,11 +86,13 @@ export function parseMemoryOps(
 
     let m: RegExpMatchArray | null;
     if ((m = line.match(RE_DELETE))) {
-      const id = Number(m[1]);
-      const k = byId.get(id);
-      if (!k || k.source === "manual" || touched.has(id)) continue;
-      touched.add(id);
-      ops.deletes.push(id);
+      for (const idStr of m[1].match(/\d+/g) || []) {
+        const id = Number(idStr);
+        const k = byId.get(id);
+        if (!k || k.source === "manual" || touched.has(id)) continue;
+        touched.add(id);
+        ops.deletes.push(id);
+      }
       continue;
     }
     if ((m = line.match(RE_UPDATE))) {
@@ -105,6 +109,7 @@ export function parseMemoryOps(
       ops.updates.push({ id, text });
       continue;
     }
+    if (RE_OP_WORD.test(line)) continue; // e.g. `UPDATE 12 text` (no colon) or `DELETE all` — not a fact, drop it
     const addM = line.match(RE_ADD);
     const text = cleanFactLine(addM ? addM[1] : line, refusalStarts, refusalContains);
     if (!text) continue;

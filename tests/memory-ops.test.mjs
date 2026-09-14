@@ -474,3 +474,20 @@ describe("/memory consolidate · round deadline", () => {
     assert.equal(env._kv.store.get("consolidate:82"), String(ids[39]));
   });
 });
+
+describe("parseMemoryOps · id spelling tolerance", () => {
+  test("ids written as [id] / #id and DELETE lists are understood (deepseek echoes the [id] it was shown)", () => {
+    const known = [K(1, "one"), K(2, "two"), K(3, "three"), K(4, "four"), K(5, "five")];
+    const ops = parseMemoryOps("DELETE [2]\nUPDATE [1]: one, corrected\nDELETE #3\nDELETE 4, [5]", known, "en", 0);
+    assert.deepEqual(ops.deletes, [2, 3, 4, 5]);
+    assert.deepEqual(ops.updates, [{ id: 1, text: "one, corrected" }]);
+    assert.deepEqual(ops.adds, []);
+  });
+  test("a protocol line that does not parse never turns into an ADD", () => {
+    const known = [K(1, "one")];
+    const ops = parseMemoryOps("UPDATE 1 no colon here\nDELETE all\nDELETE [999]", known, "en", 5);
+    assert.deepEqual(ops.adds, []);
+    assert.deepEqual(ops.updates, []);
+    assert.deepEqual(ops.deletes, []); // 999 was not shown → hallucinated id, dropped
+  });
+});
