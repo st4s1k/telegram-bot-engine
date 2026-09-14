@@ -331,3 +331,92 @@ describe("/memory consolidate · full reconciliation pass", () => {
     assert.deepEqual((await dbMemories(env, 77)).map(x => x.text), ["new"]);
   });
 });
+
+
+/* ====================================================================== */
+/* =====================  /memory consolidate · loop + cursor  ========== */
+/* ====================================================================== */
+
+// One invocation loops over the facts in windows of MEM_CONSOLIDATE_MAX (40) while under the time budget;
+// progress survives between invocations via the KV cursor `consolidate:<chatId>`, so a clean oldest window
+// (NONE) no longer traps every later run on the same 40 facts.
+describe("/memory consolidate · loops over windows, resumes from the KV cursor", () => {
+  const CURSOR = (chatId) => "consolidate:" + chatId;
+  async function seed45(ctx) {
+    const ids = [];
+    for (let i = 0; i < 45; i++) ids.push(await addMemory(ctx, "fact " + i, "auto"));
+    return ids;
+  }
+  const prompts = () => FETCH.of("/chat/completions").map(c => c.body.messages[0].content);
+
+  test("a clean first window (NONE) does not stop the run: the second window is processed in the same call", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 75, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
+    const ids = await seed45(ctx);
+    let n = 0;
+    FETCH.set("chat", () => sse([++n === 1 ? "NONE" : `DELETE ${ids[40]}`]));
+    const out = await runMemory(ctx, "/memory consolidate");
+    assert.equal(n, 2);                                    // two windows → two passes
+    assert.match(out, /deleted 1 \(of 45 facts\) — checked 45, passes: 2/);
+    assert.ok(!/Ran out of time/.test(out));               // complete → no partial suffix
+    assert.equal((await dbMemories(env, 75)).length, 44);
+    assert.ok(!env._kv.store.has(CURSOR(75)));             // finished → cursor cleared
+    // each window saw only its own ids
+    const [p1, p2] = prompts();
+    assert.ok(p1.includes(`[${ids[0]}]`) && !p1.includes(`[${ids[40]}]`));
+    assert.ok(p2.includes(`[${ids[40]}]`) && !p2.includes(`[${ids[0]}]`));
+  });
+
+  test("an LLM failure after the first pass keeps the progress, stores the cursor; the next run resumes after it", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 76, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
+    const ids = await seed45(ctx);
+    let n = 0;
+    FETCH.set("chat", () => (++n === 1 ? sse([`DELETE ${ids[3]}`]) : sse([], { ok: false, status: 500 })));
+    const out = await runMemory(ctx, "/memory consolidate");
+    assert.match(out, /deleted 1 \(of 45 facts\) — checked 40, passes: 1/); // progress of pass 1 kept
+    assert.match(out, /Ran out of time/);                                     // reported as partial
+    assert.equal(env._kv.store.get(CURSOR(76)), String(ids[39]));            // cursor = last id of window 1
+
+    // next invocation: continues AFTER the cursor — only the 5 remaining facts are shown
+    FETCH.set("chat", () => sse(["NONE"]));
+    const out2 = await runMemory(ctx, "/memory consolidate");
+    const last = prompts().at(-1);
+    assert.ok(last.includes(`[${ids[40]}]`) && !last.includes(`[${ids[0]}]`) && !last.includes(`[${ids[39]}]`));
+    assert.match(out2, /already tidy/);                    // the remaining window was clean → tidy, not partial
+    assert.ok(!env._kv.store.has(CURSOR(76)));             // reached the end → cursor cleared
+  });
+
+  test("a failure on the very FIRST pass of a run → failure message, nothing changed, cursor untouched", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 77, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
+    await seed45(ctx);
+    FETCH.set("chat", () => sse([], { ok: false, status: 500 }));
+    assert.match(await runMemory(ctx, "/memory consolidate"), /Couldn't consolidate/);
+    assert.equal((await dbMemories(env, 77)).length, 45);
+    assert.ok(!env._kv.store.has(CURSOR(77)));
+  });
+
+  test("time budget: with budgetMs=0 exactly one pass runs, the rest is left for the next run", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 78, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
+    const ids = await seed45(ctx);
+    FETCH.set("chat", () => sse(["NONE"]));
+    const r = await consolidateMemories(ctx, { budgetMs: 0 });
+    assert.equal(r.passes, 1);
+    assert.equal(r.checked, 40);
+    assert.equal(r.partial, true);
+    assert.equal(env._kv.store.get(CURSOR(78)), String(ids[39]));
+  });
+
+  test("a stale cursor past the newest fact → the run starts over from the oldest", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 79, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
+    const ids = [await addMemory(ctx, "a", "auto"), await addMemory(ctx, "b", "auto")];
+    await env.KV.put(CURSOR(79), String(ids[1] + 1000));
+    FETCH.set("chat", () => sse(["NONE"]));
+    await runMemory(ctx, "/memory consolidate");
+    assert.ok(prompts().at(-1).includes(`[${ids[0]}]`));
+    assert.ok(!env._kv.store.has(CURSOR(79)));
+  });
+});

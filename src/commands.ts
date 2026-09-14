@@ -348,7 +348,7 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
       if (!r) return t(lang, "mem_consolidate_fail");
       if (r.total < 2) return t(lang, "mem_consolidate_few", r.total);
       if (!r.updated && !r.deleted && !r.partial) return t(lang, "mem_consolidate_clean", r.total);
-      return t(lang, "mem_consolidate_done", r.updated, r.deleted, r.total, r.partial ? t(lang, "mem_consolidate_partial") : "");
+      return t(lang, "mem_consolidate_done", r.updated, r.deleted, r.total, r.checked, r.passes, r.partial ? t(lang, "mem_consolidate_partial") : "");
     }
 
     // /memory size_chars [N] — show/set the history size (in characters).

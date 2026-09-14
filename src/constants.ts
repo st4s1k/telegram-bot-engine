@@ -44,5 +44,6 @@ export const MEM_MAX_TOKENS = 1500;        // response cap for fact extraction (
 export const MEM_KNOWN_SHOWN = 40;         // how many recent known facts the extractor is shown (and may UPDATE/DELETE)
 export const MEM_CONSOLIDATE_MAX = 40;     // facts covered by ONE /memory consolidate pass (oldest first; more → partial). 40, not 120: a
                                             // thinking model over 120 facts ran past the 50 s webhook ceiling (LLM_TIMEOUT_MS) — passes repeat anyway
+export const MEM_CONSOLIDATE_TIME_BUDGET_MS = 35_000; // /memory consolidate loops passes while under this — the command runs inside the ~60 s Telegram webhook
 export const MEM_CONSOLIDATE_MAX_TOKENS = 3000; // response cap for the consolidation pass (≤ ~800 tokens of ops for 40 facts + room for reasoning)
 export const SUMMARY_MAX_TOKENS = 2000;    // response cap for the /summary digest (auxiliary call; was 1000 — see the NOTE above)
