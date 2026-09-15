@@ -436,3 +436,26 @@ describe("Memory · /memory reindex (admin only)", () => {
     assert.equal(env._ai.calls.length, before);
   });
 });
+
+describe("Memory · /memory recall <text> (admin diagnostic)", () => {
+  test("shows the rewritten query and the dated facts the reply path would inject; nothing written", async () => {
+    const env = ragEnv();
+    const cd = { ...DEFAULT_CHAT_DATA(), history: [{ role: "user", content: "у Лены болят зубы", meta: { message_id: 1 } }], config: { rag_min_score: 0 } };
+    const ctx = makeCtxFor(makeMsg({ chatId: 410, chatType: "private", username: "admin", message_id: 2 }), env, cd);
+    await addMemory(ctx, "Лена планирует поставить зубной имплант, но ещё не приняла окончательное решение.", "auto");
+    FETCH.set("chat", () => sse(["Лена зубной имплант"]));
+    const out = await runMemory(ctx, "/memory recall а она решилась на имплант?");
+    assert.ok(out.includes("Запрос: а она решилась на имплант? ⟶ Лена зубной имплант"), out);
+    assert.ok(out.includes("Найдено фактов: 1"), out);
+    assert.ok(/— \[\d{4}-\d{2}-\d{2}\] Лена планирует поставить зубной имплант/.test(out), out);
+    assert.equal(FETCH.of("/chat/completions").length, 1); // the rewrite only — no reply generated
+  });
+  test("a non-admin gets the usual status; rag off says so", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 411, username: "vasya" }), env);
+    assert.ok(!/Запрос:/.test(await runMemory(ctx, "/memory recall что-то")));
+    const off = makeCtxFor(makeMsg({ chatId: 412, chatType: "private", username: "admin" }), makeEnv());
+    const out = await runMemory(off, "/memory recall что-то");
+    assert.ok(out.includes("Найдено фактов: 0") && out.includes("config rag on"), out);
+  });
+});

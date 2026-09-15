@@ -14,7 +14,7 @@ import {
 import { ragReindexMemories } from "./rag";
 import { CONFIG_SCHEMA, CONFIG_PRESETS, getGlobalConfig, mergeConfig, buildHelp, buildConfigHelp, buildConfigGroupHelp, findConfigGroup, buildInfoStatus, setConfigParam } from "./config";
 import { fetchModelPrice, fetchOpenRouterUsage, runLLMWithHistory } from "./llm";
-import { recallMemories } from "./recall";
+import { recallMemories, rewriteRecallQuery, ragRetrieveMemories } from "./recall";
 import { buildDefaultPrompt } from "./prompts";
 import { sendTyping, sendAndStore, syncBotCommands } from "./telegram";
 import { runIncrementalSummary } from "./summary";
@@ -298,6 +298,20 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
       if (!rows.length) return t(lang, "mem_list_empty");
       const r = await ragReindexMemories(ctx, rows);
       return t(lang, "mem_reindex_ok", r.done, r.total);
+    }
+
+    // /memory recall <text> — ADMIN ONLY (hidden from help): the recall DIAGNOSTIC — what the reply path would
+    // look up for this text in this chat: the query after the context rewrite (rewriteRecallQuery over the chat's
+    // history) and the dated facts the hybrid search returns, in rank order. Nothing is written. Works through
+    // `/admin chat <id> /memory recall <text>`. Tells apart "the fact was never recalled" from "the model ignored it".
+    const rc = raw.match(/^recall\s+([\s\S]+)$/i);
+    if (rc && isAdminUser(ctx)) {
+      const q = stripBotAddressing(rc[1].trim(), ctx.cfg);
+      const query = await rewriteRecallQuery(ctx, q);
+      const facts = await ragRetrieveMemories(ctx, query);
+      const lines = [t(lang, "mem_recall_head", query === q ? q : q + " ⟶ " + query, facts.length), ...facts.map(f => "— " + f)];
+      if (!ctx.cfg.rag) lines.push(t(lang, "mem_hint_notes")); // recall never runs with rag off — say so instead of a silent 0
+      return lines.join("\n");
     }
 
     if (sub === "dedupe" || tList(lang, "mem_sub_dedupe").includes(sub)) {
