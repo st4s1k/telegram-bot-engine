@@ -8,7 +8,7 @@
 //
 // Gating: vector WRITE/DELETE always runs when the bindings are present (so the index stays
 // consistent with the table regardless of the flag and needs no backfill) — /memory add embeds
-// the fact even when RAG is disabled. RECALL (ragRetrieveMemories) and AUTO-CURATION are under cfg.rag.
+// the fact even when RAG is disabled. RECALL (recall.ts, over ragQueryMemories here) and AUTO-CURATION are under cfg.rag.
 // Everything is BEST-EFFORT: an AI/Vectorize error is logged and swallowed, never breaks the reply/history.
 
 import { RAG_EMBED_MODEL, RAG_MAX_EMBED_CHARS, RAG_META_TEXT_CAP, RAG_TIMEOUT_MS } from "./constants";
@@ -25,7 +25,7 @@ export function memNamespace(chatId: number | string): string {
 // Race a promise against a timeout: on the hot reply path we don't wait for AI/Vectorize longer than ms (return null).
 // .catch silences a LATE reject from a "hung" call (the timeout already won the race) — otherwise it would become
 // an unhandledRejection; .finally(clearTimeout) clears the timer on any outcome (no dangling timers).
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
+export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const guarded: Promise<T | null> = Promise.resolve(p).catch(() => null);
   const timeout = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), ms); });
@@ -104,36 +104,38 @@ export async function ragDeleteIdsEnv(env: Env, vectorIds: string[]): Promise<vo
 
 interface MemMeta { mem_id?: number; text?: string; source?: string }
 
-// Recall FACTS relevant to the query's meaning → ready-made strings for the prompt. Under cfg.rag.
-// Best-effort → [] on any error. The text is taken from the vector's metadata (without a trip to D1).
-export async function ragRetrieveMemories(ctx: Ctx, queryText: string): Promise<string[]> {
+export interface MemMatch { memId: number; text: string; score: number }
+
+// The VECTOR side of recall: the facts semantically closest to `queryText` in the chat namespace, best first,
+// filtered by rag_min_score — up to `topK` (Vectorize caps topK at 50 with returnMetadata:"all"). The hybrid
+// recall (recall.ts) fuses this list with a lexical ranking. Under cfg.rag. Best-effort → [] on any error.
+export async function ragQueryMemories(ctx: Ctx, queryText: string, topK: number): Promise<MemMatch[]> {
   if (!ctx.cfg.rag || !ctx.env.VECTORIZE || !ctx.env.AI) return [];
   const q = String(queryText ?? "").trim();
   if (!q) return [];
   try {
     const vecs = await embedTexts(ctx.env, [q]);
     if (!vecs) return [];
-    // Vectorize caps topK at 50 when returnMetadata:"all" — we clamp (env RAG_TOP_K
-    // is not bounded from above; /config — 1..20), plus Math.trunc in case of a fractional value.
-    const topK = Math.min(50, Math.max(1, Number.isFinite(ctx.cfg.rag_top_k) ? Math.trunc(ctx.cfg.rag_top_k) : 5));
+    const k = Math.min(50, Math.max(1, Math.trunc(topK) || 1));
     const res = await withTimeout(
-      ctx.env.VECTORIZE.query(vecs[0], { topK, namespace: memNamespace(ctx.chatId), returnMetadata: "all" }),
+      ctx.env.VECTORIZE.query(vecs[0], { topK: k, namespace: memNamespace(ctx.chatId), returnMetadata: "all" }),
       RAG_TIMEOUT_MS,
     );
     const matches = res?.matches || [];
     const minScore = Number.isFinite(ctx.cfg.rag_min_score) ? ctx.cfg.rag_min_score : 0.45; // keep in sync with getGlobalConfig's default
-
-    const kept: string[] = [];
+    const out: MemMatch[] = [];
     for (const m of matches) {
       if (typeof m.score !== "number" || m.score < minScore) continue;
       const md = m.metadata as unknown as MemMeta | undefined;
       if (!md || typeof md.text !== "string" || !md.text) continue; // orphan tolerance
-      kept.push(md.text); // facts are neutral statements, no role label; "—" is added by assemblePrompt
+      // mem id: from metadata, else from the vector id `m<chat>:<id>` (older vectors); unknown → a negative pseudo id
+      const fromId = Number(String(m.id).split(":")[1]);
+      const memId = Number.isFinite(md.mem_id) ? Number(md.mem_id) : (Number.isFinite(fromId) && fromId > 0 ? fromId : -(out.length + 1));
+      out.push({ memId, text: md.text, score: m.score });
     }
-    // Vectorize order is by descending score (most relevant first); we just slice topK.
-    return kept.slice(0, topK);
+    return out; // Vectorize order is by descending score (most relevant first)
   } catch (e: any) {
-    console.warn("rag.ragRetrieveMemories failed", { chatId: ctx.chatId, err: e?.message || e });
+    console.warn("rag.ragQueryMemories failed", { chatId: ctx.chatId, err: e?.message || e });
     return [];
   }
 }

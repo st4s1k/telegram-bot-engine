@@ -20,7 +20,7 @@ neutral. Engine code, comments and UI strings are in **English**; UI strings are
 ## What the engine does
 
 - **LLM conversation** (streaming SSE) with a per-chat role (`/rp`) and model switching (`/model`).
-- **Long-term memory (RAG):** curated facts in Vectorize + Workers AI, semantic recall into the reply.
+- **Long-term memory (RAG):** curated facts in Vectorize + Workers AI; hybrid recall (vector + lexical, query rewritten from chat context), dated facts injected into the reply.
 - **Summaries:** an incremental `/summary` "what's new" digest + an optional daily summary via cron.
 - **Vision:** describes sent photos/stickers, with a per-image description cache.
 - **Per-chat config** via `/config`, memory control via `/memory`.
@@ -192,6 +192,7 @@ Typed ES-modules, layered bottom-up (each imports only from lower layers; no cyc
 | `utils.ts` | pure helpers: `makeCtx`, `shouldAnswer`, visual/parsing/name helpers, time formatters |
 | `prompts.ts` | system-prompt assembly (engine builders: default/reply/vision) |
 | `rag.ts` | Vectorize/Workers AI: embed/upsert/query/delete |
+| `recall.ts` | hybrid recall: query rewrite → vector + lexical (RRF) → dated facts |
 | `persona/registry.ts` | persona contract + active-pack singleton; `persona/active.ts`, `persona/default.ts` |
 | `storage.ts` | chat state (D1 row) + write-through history + `memories` |
 | `telegram.ts` | MarkdownV2 converter + Telegram I/O + `reportError` |

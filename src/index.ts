@@ -102,6 +102,7 @@ export * from "./i18n";
 export * from "./utils";
 export * from "./prompts";
 export * from "./rag";
+export * from "./recall";
 export * from "./storage";
 export * from "./telegram";
 export * from "./llm";

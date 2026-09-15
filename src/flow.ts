@@ -18,7 +18,7 @@ import { runIncrementalSummary } from "./summary";
 import { runMemoryCuration } from "./curation";
 import { getPersonaQuickReplies, getPersonaThrows } from "./persona/registry";
 import { handlePhotoMessage } from "./vision";
-import { ragRetrieveMemories } from "./rag";
+import { recallMemories } from "./recall";
 import type { BotConfig, Ctx, Env, TgMessage } from "./types";
 
 export async function handleTelegramMessage(msg: TgMessage, env: Env, isEdit: boolean = false): Promise<void> {
@@ -202,7 +202,7 @@ export async function handleChatMessage(ctx: Ctx, opts: { force?: boolean } = {}
   // Skip the embed + vector query for trivially short remainders ("ok", an emoji, a bare «Фасол?») —
   // they can't clear rag_min_score anyway, so don't pay the embed + Vectorize round-trip on the hot path.
   const ragQuery = (kind === "default" && ctx.cfg.rag) ? stripBotAddressing(ctx.textRaw || "", ctx.cfg) : "";
-  const memories = ragQuery.length >= 4 ? await ragRetrieveMemories(ctx, ragQuery) : [];
+  const memories = ragQuery.length >= 4 ? await recallMemories(ctx, ragQuery) : []; // rewrite from context → hybrid (vector + lexical) → dated facts
 
   await sendTyping(ctx); // instant "bot is typing" feedback while the model thinks
   const out = await handler(ctx, memories);

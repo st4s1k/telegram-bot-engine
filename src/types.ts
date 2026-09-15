@@ -24,6 +24,7 @@ export interface Env {
   MAX_HISTORY_CHARS?: string;
   MAX_TOKENS?: string;
   ENABLE_RAG?: string;
+  ENABLE_RAG_REWRITE?: string; // recall query rewrite from chat context (default on)
   RAG_TOP_K?: string;
   RAG_MIN_SCORE?: string;
   BOT_USERNAME?: string;
@@ -221,6 +222,7 @@ export interface BotConfig {
   rag: boolean;
   rag_top_k: number;
   rag_min_score: number;
+  ragRewrite: boolean;
   daily_summary: boolean;
   botUsername: string;
   botName: string;

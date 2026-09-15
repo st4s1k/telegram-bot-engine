@@ -104,6 +104,9 @@ export function getGlobalConfig(env: Env): BotConfig {
     // 0.45, not 0.5: measured on the live bge-m3 index, correct facts often score 0.45–0.5 while junk can
     // sit just above 0.5 — a hair lower keeps the right facts in (topK still caps the noise).
     rag_min_score: num(env.RAG_MIN_SCORE, 0.45),
+    // Recall query rewrite (recall.ts): the message is rewritten into a standalone search query from the recent
+    // history before the memory lookup (+1 cheap LLM call on the reply path). ON by default; env ENABLE_RAG_REWRITE=false turns it off.
+    ragRewrite: env.ENABLE_RAG_REWRITE === undefined ? true : bool(env.ENABLE_RAG_REWRITE),
     // Daily summary via cron (08:00 in the configured timezone) — opt-in per chat via /config daily_summary on.
     // OFF by default: the bot sends nothing on its own until the chat has subscribed.
     daily_summary: false,

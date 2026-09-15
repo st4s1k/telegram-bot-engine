@@ -331,7 +331,8 @@ export async function deleteMemory(ctx: Ctx, memId: number): Promise<boolean> {
   return changed;
 }
 
-// Replace the text of ONE chat fact in place (same memories.id) and re-embed it — the vector id is
+// Replace the text of ONE chat fact in place (same memories.id) and re-embed it; created_at is bumped to now —
+// the row now states the CURRENT state, and recall shows that date next to the fact. The vector id is
 // stable (m<chatId>:<id>), so the upsert overwrites the old embedding. For the curation UPDATE op.
 // Chat-scoped. Returns false when the id is not ours, the text is empty/unchanged, or the new text
 // collides with another fact (UNIQUE(chat_id,text)) — a collision means the caller should merge (delete).
@@ -340,8 +341,8 @@ export async function updateMemory(ctx: Ctx, memId: number, text: string): Promi
   if (!clean) return false;
   try {
     const r = await ctx.env.DB.prepare(
-      "UPDATE memories SET text=? WHERE chat_id=? AND id=? AND text<>?"
-    ).bind(clean, String(ctx.chatId), memId, clean).run();
+      "UPDATE memories SET text=?, created_at=? WHERE chat_id=? AND id=? AND text<>?"
+    ).bind(clean, Date.now(), String(ctx.chatId), memId, clean).run();
     if (Number((r as any)?.meta?.changes) !== 1) return false;
   } catch (e: any) {
     // UNIQUE(chat_id, text) — the new text already exists as another fact. Not an error: the caller merges.

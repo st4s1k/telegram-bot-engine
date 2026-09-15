@@ -31,6 +31,15 @@ export const RAG_EMBED_MODEL = "@cf/baai/bge-m3"; // 1024-dimensional vectors (=
 export const RAG_MAX_EMBED_CHARS = 2000;   // truncate the embedding input (~< 512 bge-m3 tokens)
 export const RAG_META_TEXT_CAP = 1500;     // how much text we carry in the vector's metadata (10 KiB limit)
 export const RAG_TIMEOUT_MS = 8_000;       // ceiling on waiting for embed/query on the hot reply path
+// Hybrid recall (recall.ts): vector candidates fetched per query (fused with the lexical ranking by RRF, then cut to rag_top_k).
+export const RAG_CANDIDATES = 20;
+export const RAG_RRF_K = 60;               // reciprocal-rank-fusion constant (the usual 60: rank 1 ≈ 0.016, rank 20 ≈ 0.012 — a fact in BOTH lists wins)
+export const RAG_LEX_MIN_MATCH = 2;        // a fact needs this many query stems in common to count as a lexical hit (or all of them for a 1-stem query)
+// Query rewrite (recall.ts): the user message → a standalone search query, from the recent history. Hot path → tight caps.
+export const RAG_REWRITE_HISTORY = 6;      // recent messages shown to the rewriter
+export const RAG_REWRITE_MAX_TOKENS = 100; // one line of query
+export const RAG_REWRITE_MAX_CHARS = 300;
+export const RAG_REWRITE_TIMEOUT_MS = 6_000; // past this the raw query is used (the reply must not wait for a slow rewrite)
 // Curating facts on the bot's reply:
 export const MEM_CURATION_MIN_NEW = 2;     // don't run extraction while there are fewer new messages
 export const MEM_MAX_FACTS_PER_RUN = 5;    // maximum facts per single extraction pass
