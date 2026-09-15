@@ -47,18 +47,6 @@
     "No more than {0} ADDs. If nothing changed and there is nothing new — reply with the single word NONE."
   ],
   "mem_extract_known": "Already known (reference by [id] for UPDATE; do NOT ADD these again):",
-  "mem_consolidate": [
-    "You are a neutral curator of a chat bot's long-term memory. Below is the FULL list of remembered facts, oldest first. Today is {0}.",
-    "The memory is VECTOR-based: a reply only recalls the facts semantically close to the question, so there is no such thing as a \"superfluous\" fact. Nothing can be deleted — there is no DELETE operation; leave duplicates and trivia alone.",
-    "Your ONLY job is CONTRADICTIONS: two facts about THE SAME THING where one is outdated because the fact changed (\"plans to\" → \"did\", \"works at\" → \"was fired\", \"lives in X\" → \"moved to Y\").",
-    "Fix such a case with one operation: UPDATE the outdated fact so it states the current state (it may mention the former one: \"had the eye surgery; had planned it since spring\").",
-    "The same PERSON or the same topic is NOT a contradiction: \"Gleb is a graphic designer\" and \"Gleb designs interfaces\" are different facts, both true — leave them.",
-    "Never glue DIFFERENT facts into one. An UPDATE's text is a pure fact — no comments, notes or parenthetical remarks of your own. Do not reword, shorten or \"polish\".",
-    "When unsure whether it is a contradiction — leave it alone.",
-    "Reply with operations, one per line: UPDATE <id>: <fact>. Refer to facts ONLY by the [id] shown.",
-    "If there are no contradictions — reply with the single word NONE."
-  ],
-  "mem_consolidate_user_turn": "Consolidate the facts above.",
 
   "cmd_unknown": "🤷 I don't know the command `{0}`.\nType `/help` for the list of commands.",
   "retry_nothing": "🤷 Nothing to retry — I don't see a recent message of yours.",
@@ -105,14 +93,6 @@
   "mem_del_ok": "🗑 Deleted fact #{0}: {1}",
   "mem_dedupe_none": "🧹 No consecutive duplicates in history.",
   "mem_dedupe_ok": "🧹 Duplicates removed: {0}.",
-  "mem_consolidate_done": "🧹 Memory consolidated: updated {0} (of {1} facts) — checked {2}, passes: {3}{4}",
-  "mem_consolidate_partial": "\n⏳ Ran out of time for one go — run it again, I'll resume where I stopped.",
-  "mem_consolidate_clean": "🧹 Memory is already tidy — no contradictions ({0} facts).",
-  "mem_consolidate_few": "🧹 Too few facts to consolidate ({0}).",
-  "mem_consolidate_fail": "⚠️ Couldn't consolidate: the model didn't answer. Try again later.",
-  "mem_consolidate_dry": "🔎 Dry run — nothing changed. Would be: updated {0} (of {1} facts) — checked {2}, passes: {3}{4}",
-  "mem_consolidate_diff_updated": "✏️ Updated (was ⟶ now):",
-  "mem_consolidate_diff_more": "…and {0} more (not shown)",
   "mem_size_show": "📏 Memory size: {0} chars.\nSet: `/memory size_chars 8000`",
   "mem_status": [
     "🧠 *Chat memory*",
@@ -125,7 +105,6 @@
     "`/memory del <N>` — delete a fact by its list number",
     "`/memory forget <all|history|memory|role|…>` — wipe (bare → help)",
     "`/memory dedupe` — remove duplicates",
-    "`/memory consolidate` — repair contradictory facts (never deletes)",
     "`/memory size_chars <N>` — memory size (chars)"
   ],
 
@@ -312,7 +291,7 @@
     "`/info` — chat status (role, model, features, history, spend)",
     "`/config` — no arg: all settings · `<group>` · `<key> <value>` · `reset` · `preset <name>`",
     "`/model` — no arg: model + price + balance · `<id>` · `vision [id]` · `summary [id]` · `reset`",
-    "`/memory` — no arg: status · `add` · `list` · `del N` · `forget` · `dedupe` · `consolidate` · `size_chars N`",
+    "`/memory` — no arg: status · `add` · `list` · `del N` · `forget` · `dedupe` · `size_chars N`",
     "`/summary` — incremental \"what's new\" digest",
     "`/retry` — re-run your last message (e.g. after a timeout / error)",
     "`/rp` `[role]` · `off` — no arg: show the role; else set / clear it",

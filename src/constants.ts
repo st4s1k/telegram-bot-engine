@@ -51,14 +51,8 @@ export const MEM_MAX_FACT_CHARS = 300;     // truncate the length of a single fa
 // stops when it is done — so they are sized to leave room for reasoning.
 export const MEM_MAX_TOKENS = 1500;        // response cap for fact extraction (auxiliary call; was 500 — starved on thinking models)
 export const MEM_KNOWN_SHOWN = 40;         // how many recent known facts the extractor is shown (and may UPDATE/DELETE)
-export const MEM_CONSOLIDATE_MAX = 40;     // facts covered by ONE /memory consolidate pass (oldest first; more → partial). 40, not 120: a
                                             // thinking model over 120 facts ran past the 50 s webhook ceiling (LLM_TIMEOUT_MS) — passes repeat anyway
-export const MEM_CONSOLIDATE_PARALLEL = 4;    // windows whose LLM passes run CONCURRENTLY in one round (independent: ops reference only their own window's ids).
                                               // 4, not 10: measured on z-ai/glm-5.3-flash, 9 concurrent passes slowed each from ~20 s to 18–50 s (per-key throughput is shared) and 6/9 failed
-export const MEM_CONSOLIDATE_TIME_BUDGET_MS = 35_000;
-export const MEM_CONSOLIDATE_ROUND_FLOOR_MS = 1_000;
-export const MEM_APPLY_PARALLEL = 8;              // memory ops applied concurrently per phase (D1 + Vectorize + embed each) // a round always gets at least this long to settle, even when the budget is already spent (tests pass budgetMs=0) // /memory consolidate loops passes while under this — the command runs inside the ~60 s Telegram webhook
-export const MEM_CONSOLIDATE_MAX_TOKENS = 3000; // response cap for the consolidation pass (≤ ~800 tokens of ops for 40 facts + room for reasoning)
-export const MEM_CONSOLIDATE_DIFF_MAX = 40;       // how many deleted/updated facts the /memory consolidate reply lists (the rest is summarised)
+export const MEM_APPLY_PARALLEL = 8;              // memory ops applied concurrently per phase (D1 + Vectorize + embed each)
 export const MEM_UPDATE_MIN_RATIO = 0.5;          // an UPDATE may not shrink a fact below this share of its length (compression ≠ correction)
 export const SUMMARY_MAX_TOKENS = 2000;    // response cap for the /summary digest (auxiliary call; was 1000 — see the NOTE above)

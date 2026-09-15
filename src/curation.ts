@@ -1,12 +1,15 @@
 /* ================= MEMORY CURATION ================= */
-// Curation of long-term memory facts. Two entry points:
-//  • runMemoryCuration — extract durable facts from NEW interlocutor messages (id > boundary) and
-//    RECONCILE them with what is already remembered. Under cfg.rag, best-effort. Called once a day
-//    (cron) and before the /summary command — NOT on every bot reply.
-//  • consolidateMemories — an explicit full pass over ALL of a chat's facts (/memory consolidate):
-//    repair contradictions (a fact that changed is UPDATEd to its current state). No new messages involved.
+// Curation of long-term memory facts. One entry point: runMemoryCuration — extract durable facts from NEW
+// interlocutor messages (id > boundary) and RECONCILE them with what is already remembered. Under cfg.rag,
+// best-effort. Called once a day (cron) and before the /summary command — NOT on every bot reply.
 //
-// Both speak the same OPERATION PROTOCOL to the model (see parseMemoryOps): ADD and UPDATE. There is NO
+// There is deliberately NO list-only "consolidation" pass: given nothing but the fact list, a model invents the
+// passage of time («должна сделать MVP до зимы» → «сделала»), glues facts of different people and never
+// converges (five runs, five different rewrites of the same facts — 2026-09-15). Every UPDATE here is grounded
+// in NEW messages, i.e. in evidence; contradictions between old facts are handled at answer time by the dates
+// on recalled facts (recall.ts), not by rewriting the store.
+//
+// The OPERATION PROTOCOL to the model (see parseMemoryOps): ADD and UPDATE. There is NO
 // DELETE — an LLM pass never removes a fact. Recall is contextual (top-k by similarity), so a stale or
 // trivial fact costs nothing, while a wrongly deleted one is gone for good — and live runs showed the
 // model calling any two facts about the same person "duplicates". Only a human deletes (/memory del,
@@ -15,14 +18,14 @@
 
 import {
   MEM_CURATION_MIN_NEW, MEM_MAX_FACTS_PER_RUN, MEM_MAX_FACT_CHARS, MEM_MAX_TOKENS,
-  MEM_KNOWN_SHOWN, MEM_CONSOLIDATE_MAX, MEM_CONSOLIDATE_MAX_TOKENS, MEM_CONSOLIDATE_TIME_BUDGET_MS, MEM_CONSOLIDATE_PARALLEL, MEM_CONSOLIDATE_ROUND_FLOOR_MS, MEM_APPLY_PARALLEL, MEM_CONSOLIDATE_DIFF_MAX, MEM_UPDATE_MIN_RATIO,
+  MEM_KNOWN_SHOWN, MEM_APPLY_PARALLEL, MEM_UPDATE_MIN_RATIO,
 } from "./constants";
 import { messagesSince, addMemory, listMemories, updateMemory } from "./storage";
 import { runLLMWithHistory } from "./llm";
-import { buildMemoryExtractionPrompt, buildMemoryConsolidationPrompt } from "./prompts";
-import { isFallbackMessage, tzStamp } from "./utils";
+import { buildMemoryExtractionPrompt } from "./prompts";
+import { isFallbackMessage } from "./utils";
 import { t, tList, DEFAULT_LANG } from "./i18n";
-import type { Ctx, Memory } from "./types";
+import type { Ctx } from "./types";
 
 /* ---------- protocol ---------- */
 
@@ -128,8 +131,8 @@ export function parseExtractedFacts(out: string, existing: string[] = [], lang: 
 
 // Apply parsed operations to storage (D1 rows + Vectorize vectors): updates, then adds. Best-effort per op.
 // Ops of one phase are independent (distinct ids), so each phase runs CONCURRENTLY in chunks of
-// MEM_APPLY_PARALLEL — a consolidation pass can emit dozens of ops, and applied one by one (D1 +
-// Vectorize + an embed per UPDATE) they alone could push the webhook past its limit.
+// MEM_APPLY_PARALLEL — applied one by one (D1 + Vectorize + an embed per UPDATE) a batch of ops could
+// stall the caller.
 async function eachConcurrently<T>(items: T[], fn: (x: T) => Promise<boolean>): Promise<number> {
   let n = 0;
   for (let i = 0; i < items.length; i += MEM_APPLY_PARALLEL) {
@@ -145,7 +148,6 @@ export async function applyMemoryOps(ctx: Ctx, ops: MemoryOps): Promise<ApplyRes
   return res;
 }
 
-const toKnown = (rows: Memory[]): KnownFact[] => rows.map(r => ({ id: r.id, text: r.text, source: r.source }));
 
 /* ---------- entry points ---------- */
 
@@ -162,9 +164,9 @@ export async function runMemoryCuration(ctx: Ctx): Promise<void> {
     // vulgar remark is not a source of facts). Advance the boundary across the whole slice anyway.
     const userItems = items.filter(it => it.role === "user");
     if (!userItems.length) { ctx.chatData._memUptoId = maxId; ctx.chatData._dirty = true; return; }
-    const all = toKnown(await listMemories(ctx.env, ctx.chatId));
+    const all: KnownFact[] = (await listMemories(ctx.env, ctx.chatId)).map(r => ({ id: r.id, text: r.text, source: r.source }));
     // The model is shown (and may reference) only the most recent facts — bounds prompt tokens.
-    // Older facts are still deduped against on ADD; a full reconciliation is `/memory consolidate`.
+    // Older facts are still deduped against on ADD.
     const shown = all.slice(-MEM_KNOWN_SHOWN);
     const out = await runLLMWithHistory(
       ctx.cfg,
@@ -191,137 +193,4 @@ export async function runMemoryCuration(ctx: Ctx): Promise<void> {
 function dedupAgainst(adds: string[], all: KnownFact[]): string[] {
   const seen = new Set(all.map(k => normKey(k.text)));
   return adds.filter(a => !seen.has(normKey(a)));
-}
-
-// Explicit full pass over the chat's facts: repair contradictions — a fact that changed («planning» →
-// «done», «works at» → «was fired») is UPDATEd to its current state. Nothing is ever deleted; duplicates
-// are left alone. Works regardless of cfg.rag (an explicit user action, like /memory add).
-// Returns the applied counts, or null when the LLM failed. `partial` = more facts than one pass covers.
-export interface ConsolidateResult extends ApplyResult {
-  total: number;   // facts in the chat when the command started
-  checked: number; // facts covered so far, counting from the oldest (== total when the pass is complete)
-  passes: number;  // LLM passes made in THIS invocation
-  partial: boolean;
-  /** what was (or, in a dry run, would be) changed — capped at MEM_CONSOLIDATE_DIFF_MAX entries in total */
-  diff: ConsolidateDiff;
-  /** dry run: nothing written, cursor untouched */
-  dryRun: boolean;
-}
-export interface ConsolidateDiff {
-  updated: { id: number; from: string; to: string }[];
-  more: number; // entries beyond the cap
-}
-
-// The resume cursor: the id of the last fact covered by a previous invocation. Kept in KV (best-effort,
-// 1-day TTL): the next /memory consolidate continues AFTER it instead of re-checking the oldest window —
-// without it a clean oldest window (the model answers NONE) would be re-checked forever and the facts
-// beyond it would never be reached. 0 / missing = start from the oldest fact.
-const consolidateCursorKey = (chatId: number | string): string => "consolidate:" + chatId;
-async function readConsolidateCursor(env: Ctx["env"], chatId: number | string): Promise<number> {
-  if (!env.KV) return 0;
-  try { return Number(await env.KV.get(consolidateCursorKey(chatId))) || 0; } catch { return 0; }
-}
-async function writeConsolidateCursor(env: Ctx["env"], chatId: number | string, id: number): Promise<void> {
-  if (!env.KV) return;
-  try {
-    if (id > 0) await env.KV.put(consolidateCursorKey(chatId), String(id), { expirationTtl: 86_400 });
-    else await env.KV.delete(consolidateCursorKey(chatId));
-  } catch { /* best-effort */ }
-}
-
-// /memory consolidate: LOOPS over the chat's facts in windows of MEM_CONSOLIDATE_MAX (oldest first), one
-// LLM pass per window — up to MEM_CONSOLIDATE_PARALLEL windows per ROUND run concurrently — while under the time budget — the command runs inside the Telegram webhook, so it
-// must answer within ~60 s. Progress is kept between invocations via the KV cursor (see above): a run that
-// hits the budget (or a mid-loop LLM failure) reports a partial pass and the next run resumes after the
-// last covered window; a run that reaches the end clears the cursor. Returns null only when NOTHING was
-// done in this invocation (the very first pass failed) — a later failure keeps the progress made.
-// budgetMs / parallel / roundMs are injectable for tests.
-// Wait for the passes of a round, but not past `deadlineMs`: one stuck stream (a provider hiccup that only
-// ends at LLM_TIMEOUT_MS) must not hold the whole round — and the Telegram webhook — hostage. A pass that
-// has not settled by the deadline counts as failed for THIS run (its window is re-checked from the cursor
-// next time); the underlying request still ends on its own timers, its late result is simply dropped.
-async function settleWithin<T>(promises: Promise<T>[], deadlineMs: number): Promise<(T | undefined)[]> {
-  const results: (T | undefined)[] = new Array(promises.length).fill(undefined);
-  let pending = promises.length;
-  if (!pending) return results;
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, Math.max(0, deadlineMs));
-    promises.forEach((p, i) => p.then(
-      (v) => { results[i] = v; },
-      () => { results[i] = undefined; },
-    ).finally(() => { if (--pending === 0) { clearTimeout(timer); resolve(); } }));
-  });
-  return results;
-}
-export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number; parallel?: number; roundMs?: number; dryRun?: boolean } = {}): Promise<ConsolidateResult | null> {
-  if (ctx._preview) return null;
-  const budgetMs = opts.budgetMs ?? MEM_CONSOLIDATE_TIME_BUDGET_MS;
-  const parallel = Math.max(1, opts.parallel ?? MEM_CONSOLIDATE_PARALLEL);
-  const dryRun = !!opts.dryRun;
-  const diff: ConsolidateDiff = { updated: [], more: 0 };
-  const all = toKnown(await listMemories(ctx.env, ctx.chatId));
-  const total = all.length;
-  if (total < 2) return { added: 0, updated: 0, total, checked: total, passes: 0, partial: false, diff, dryRun };
-
-  const cursor = await readConsolidateCursor(ctx.env, ctx.chatId);
-  let start = cursor > 0 ? all.findIndex(k => k.id > cursor) : 0;
-  if (start < 0) start = 0; // a stale cursor past the newest fact → start over from the oldest
-
-  const t0 = Date.now();
-  let passes = 0, updated = 0, lastRoundMs = 0, failed = false;
-  // A pass cut by max_tokens (finish=length) ends in a partial line — drop it: applying a fragment as an
-  // UPDATE would overwrite a fact with half a sentence. (A complete last line lost this way is just redone next time.)
-  const passOver = async (slice: KnownFact[]): Promise<string> => {
-    let truncated = false;
-    const out = await runLLMWithHistory(
-      ctx.cfg,
-      buildMemoryConsolidationPrompt(ctx.cfg.lang, slice, tzStamp(Date.now(), ctx.cfg.timezone).slice(0, 10)),
-      [],
-      t(ctx.cfg.lang, "mem_consolidate_user_turn"),
-      ctx.msg,
-      { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel, maxTokens: MEM_CONSOLIDATE_MAX_TOKENS, reasoning: false,
-        onMeta: (m) => { if (m.finishReason === "length") truncated = true; } }
-    );
-    if (!truncated || isFallbackMessage(out)) return out;
-    const lines = out.split("\n");
-    lines.pop();
-    return lines.join("\n");
-  };
-  while (start < total && !failed) {
-    // Never start a round that (judging by the previous one) would overrun the budget; the first always runs.
-    if (passes > 0 && Date.now() - t0 + lastRoundMs >= budgetMs) break;
-    // One ROUND = up to parallel windows whose LLM passes run CONCURRENTLY — windows are independent
-    // (ops may only reference the ids shown in their own window), so a round costs the time of its
-    // slowest pass, not the sum. Ops are applied in window order afterwards.
-    const windows: KnownFact[][] = [];
-    for (let s = start; s < total && windows.length < parallel; s += MEM_CONSOLIDATE_MAX) windows.push(all.slice(s, s + MEM_CONSOLIDATE_MAX));
-    const r0 = Date.now();
-    // The round may run until the budget is spent (never less than a floor, so a fast model always gets a
-    // fair chance) — a window still in flight after that is treated as failed for this run.
-    const deadline = opts.roundMs ?? Math.max(MEM_CONSOLIDATE_ROUND_FLOOR_MS, budgetMs - (Date.now() - t0));
-    const outs = await settleWithin(windows.map(passOver), deadline);
-    lastRoundMs = Date.now() - r0;
-    for (let w = 0; w < windows.length; w++) {
-      const out = outs[w];
-      if (out === undefined || isFallbackMessage(out)) { failed = true; continue; } // failed or not settled in time → redone next run
-      // A consolidation pass rewrites what exists; it is not a place to invent new facts.
-      const ops = parseMemoryOps(out, windows[w], ctx.cfg.lang, 0);
-      // Record the diff (texts come from the window the model saw) — the reply shows WHAT changed (was ⟶ now),
-      // so a human reviews a short diff instead of the whole list. A dry run stops here: counts, no writes.
-      const byId = new Map(windows[w].map(k => [k.id, k]));
-      for (const u of ops.updates) { if (diff.updated.length < MEM_CONSOLIDATE_DIFF_MAX) diff.updated.push({ id: u.id, from: byId.get(u.id)?.text ?? "", to: u.text }); else diff.more++; }
-      if (dryRun) { updated += ops.updates.length; passes++; }
-      else {
-        const res = await applyMemoryOps(ctx, ops);
-        updated += res.updated; passes++;
-      }
-      // The cursor must stay CONTIGUOUS: a window after a failed one is still applied (its ops are safe and
-      // already paid for) but does not advance `start` — it gets re-checked from the cursor next time.
-      if (!failed) start += windows[w].length;
-    }
-  }
-  if (passes === 0) return null; // nothing achieved in this invocation → report the failure
-  const partial = start < total;
-  if (!dryRun) await writeConsolidateCursor(ctx.env, ctx.chatId, partial && start > 0 ? all[start - 1].id : 0); // start=0 → no contiguous progress → no cursor; a dry run never moves it
-  return { added: 0, updated, total, checked: start, passes, partial, diff, dryRun };
 }

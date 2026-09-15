@@ -145,7 +145,7 @@ export function asciiHeader(v: string): string {
 const REASONING_MANDATORY_RE = /reasoning is mandatory|cannot be disabled/i;
 
 // Per-call metadata a caller may ask for (onMeta): the stream's finish_reason — "length" means the reply was
-// cut by max_tokens, so its last line is a fragment (consolidation drops it rather than applying a partial UPDATE).
+// cut by max_tokens, so its last line may be a fragment (a caller can drop it rather than apply a partial line).
 export interface LLMMeta { finishReason?: string }
 export async function callOpenRouter(
   cfg: BotConfig,
@@ -210,7 +210,7 @@ export async function callOpenRouter(
       const elapsed = Date.now() - startTs;
       logLLM(cfg, tag + "_err", { rid, status: res.status, elapsed, body: body.slice(0, 500) });
       llmStat({ rid, tag, model, elapsed, outcome: "http_" + res.status });
-      // The auxiliary callers (summary / fact curation / consolidation) pass reasoning:false purely for
+      // The auxiliary callers (summary / fact curation / recall rewrite) pass reasoning:false purely for
       // speed, never as a requirement — so when the endpoint says reasoning can't be disabled, retry
       // ONCE with reasoning kept but excluded from the output (the same shape a normal reply uses).
       // Bounded by construction: the retry runs with useReasoning=true and never sends enabled:false again.

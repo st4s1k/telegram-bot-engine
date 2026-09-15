@@ -15,7 +15,7 @@ import { CONFIG_SCHEMA, CONFIG_PRESETS, getGlobalConfig, mergeConfig, buildHelp,
 import { fetchModelPrice, fetchOpenRouterUsage } from "./llm";
 import { sendTyping, sendAndStore, syncBotCommands } from "./telegram";
 import { runIncrementalSummary } from "./summary";
-import { runMemoryCuration, consolidateMemories } from "./curation";
+import { runMemoryCuration } from "./curation";
 import { getPersona, getPersonaStateDefaults, getAllCommands, setEngineCommands } from "./persona/registry";
 import type { RegisteredCommand } from "./persona/registry";
 import type { CommandMode, Ctx, TgMessage } from "./types";
@@ -338,28 +338,6 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
       const removed = await dedupeChatHistory(ctx);
       if (!removed) return t(lang, "mem_dedupe_none");
       return t(lang, "mem_dedupe_ok", removed);
-    }
-
-    // /memory consolidate — LLM passes over the chat's facts that REPAIR CONTRADICTIONS: a fact that changed
-    // («planning» → «done», «works at» → «was fired») is UPDATEd to its current state. Nothing is ever deleted
-    // by an LLM pass (only a human does: `del`/`forget`/`dedupe`). Works with rag off too (like /memory add).
-    // Manual facts are never touched. `/memory consolidate dry` (aliases in mem_sub_consolidate_dry) = a PREVIEW:
-    // the same LLM passes, the reply shows what WOULD be updated, nothing is written and the cursor stays put.
-    const cParts = raw.split(/\s+/);
-    const cHead = (cParts[0] || "").toLowerCase();
-    const cArg = (cParts[1] || "").toLowerCase();
-    if (cHead === "consolidate" || tList(lang, "mem_sub_consolidate").includes(cHead)) {
-      const dryRun = cArg === "dry" || tList(lang, "mem_sub_consolidate_dry").includes(cArg);
-      const r = await consolidateMemories(ctx, { dryRun });
-      if (!r) return t(lang, "mem_consolidate_fail");
-      if (r.total < 2) return t(lang, "mem_consolidate_few", r.total);
-      if (!r.updated && !r.partial) return t(lang, "mem_consolidate_clean", r.total);
-      const head = t(lang, r.dryRun ? "mem_consolidate_dry" : "mem_consolidate_done", r.updated, r.total, r.checked, r.passes, r.partial ? t(lang, "mem_consolidate_partial") : "");
-      // The diff: every update as `was ⟶ now` — a reviewable list instead of 250 rows.
-      const lines: string[] = [head];
-      if (r.diff.updated.length) { lines.push("", t(lang, "mem_consolidate_diff_updated")); for (const u of r.diff.updated) lines.push("— " + u.from + " ⟶ " + u.to); }
-      if (r.diff.more) lines.push(t(lang, "mem_consolidate_diff_more", r.diff.more));
-      return lines.join("\n");
     }
 
     // /memory size_chars [N] — show/set the history size (in characters).
