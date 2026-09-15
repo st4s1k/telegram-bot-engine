@@ -13,7 +13,7 @@
 
 import {
   MEM_CURATION_MIN_NEW, MEM_MAX_FACTS_PER_RUN, MEM_MAX_FACT_CHARS, MEM_MAX_TOKENS,
-  MEM_KNOWN_SHOWN, MEM_CONSOLIDATE_MAX, MEM_CONSOLIDATE_MAX_TOKENS, MEM_CONSOLIDATE_TIME_BUDGET_MS, MEM_CONSOLIDATE_PARALLEL, MEM_CONSOLIDATE_ROUND_FLOOR_MS, MEM_APPLY_PARALLEL, MEM_CONSOLIDATE_DIFF_MAX, MEM_UPDATE_MIN_RATIO,
+  MEM_KNOWN_SHOWN, MEM_CONSOLIDATE_MAX, MEM_CONSOLIDATE_MAX_TOKENS, MEM_CONSOLIDATE_TIME_BUDGET_MS, MEM_CONSOLIDATE_PARALLEL, MEM_CONSOLIDATE_ROUND_FLOOR_MS, MEM_APPLY_PARALLEL, MEM_CONSOLIDATE_DIFF_MAX, MEM_UPDATE_MIN_RATIO, MEM_DELETE_MIN_OVERLAP,
 } from "./constants";
 import { messagesSince, addMemory, listMemories, updateMemory, deleteMemory } from "./storage";
 import { runLLMWithHistory } from "./llm";
@@ -131,6 +131,61 @@ export function parseMemoryOps(
   return ops;
 }
 
+// Content stems of a fact, for the delete guard below: lower-cased words of ≥3 letters/digits (сыр, кот count) cut
+// to 4 chars — a crude stemmer that survives Russian inflection (сделала/сделать → сдел, банке/банка → банк) — minus
+// the short function words that would otherwise create spurious overlap (для, все, the, has …). Words capitalised in
+// the original text (names, brands, titles — Глеб, Killing Floor, «Сумерки») are DROPPED: two facts about the same
+// PERSON share the name by definition, and that must not count as sharing the fact.
+const STEM_STOP = new Set([
+  "для", "она", "они", "оно", "его", "ему", "нею", "как", "что", "все", "всё", "так", "уже", "нет", "или", "под", "над", "при", "про", "без",
+  "это", "эта", "эти", "тот", "том", "той", "чем", "кто", "где", "там", "тут", "вот", "был", "ещё", "еще", "раз", "лет", "год", "дня", "дней",
+  "the", "and", "has", "had", "not", "was", "are", "for", "but", "who", "his", "her", "she", "him", "its", "did", "can", "may", "all", "any", "out", "now", "one", "two", "too", "yet", "own", "per",
+]);
+export function factStems(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const w of text.match(/[\p{L}\p{N}]+/gu) || []) {
+    if (w.length < 3 || /^\p{Lu}/u.test(w)) continue;
+    const lw = w.toLowerCase();
+    if (STEM_STOP.has(lw)) continue;
+    out.add(lw.slice(0, 4));
+  }
+  return out;
+}
+// Share of the deleted fact's stems that the kept fact also carries (0..1; 0 when the deleted fact has none).
+export function factOverlap(deleted: string, kept: string): number {
+  const a = factStems(deleted), b = factStems(kept);
+  if (!a.size) return 0;
+  let shared = 0;
+  for (const st of a) if (b.has(st)) shared++;
+  return shared / a.size;
+}
+
+// The consolidation guard on deletes. Policy: a DELETE is only ever the losing twin of a merge or a fact superseded
+// by a newer one — so it MUST name what stays (`-> keepId`, or the twin of a merge), and the kept fact — as it will
+// read after the pass — must overlap the deleted one in content (≥ MEM_DELETE_MIN_OVERLAP of its stems): the same
+// FACT, not merely the same person or topic. Live runs showed the model pairing «Глеб проектирует интерфейсы» with
+// «Глеб … графический дизайнер» or «Стас избегает незнакомых девушек» with «Стас водомут» as "duplicates" — topic
+// confused with identity — and losing a fact is irreversible, so such deletes are dropped and reported (`blocked`).
+// A keep that is itself deleted in the pass, unknown, or missing counts as no pair. Consolidation only: the
+// extraction pass may legitimately DELETE a fact the user retracted, with nothing to point at.
+export function guardConsolidationDeletes(ops: MemoryOps, known: KnownFact[]): { ops: MemoryOps; blocked: { id: number; keep?: number }[] } {
+  const text = new Map<number, string>(known.map(k => [k.id, k.text]));
+  for (const u of ops.updates) text.set(u.id, u.text);
+  const blocked: { id: number; keep?: number }[] = [];
+  const deletes: number[] = [];
+  const keeps: Record<number, number> = {};
+  for (const id of ops.deletes) {
+    const kid = ops.keeps[id];
+    const kept = kid !== undefined ? text.get(kid) : undefined;
+    if (kid === undefined || kept === undefined || ops.deletes.includes(kid) || factOverlap(text.get(id) ?? "", kept) < MEM_DELETE_MIN_OVERLAP) {
+      blocked.push(kid !== undefined ? { id, keep: kid } : { id });
+      continue;
+    }
+    deletes.push(id); keeps[id] = kid;
+  }
+  return { ops: { ...ops, deletes, keeps }, blocked };
+}
+
 // Back-compat wrapper: the old "lines → new facts" parser. Kept for callers/tests that only care about
 // additions; ops on ids are ignored here (no ids were shown).
 export function parseExtractedFacts(out: string, existing: string[] = [], lang: string = DEFAULT_LANG): string[] {
@@ -225,6 +280,8 @@ export interface ConsolidateDiff {
   /** `keep` = the fact that stays in place of the deleted one (as it will read after this pass), when the model named it */
   deleted: { id: number; text: string; keep?: { id: number; text: string } }[];
   updated: { id: number; from: string; to: string }[];
+  /** deletes the model asked for that the guard refused (no pair / the pair is not the same fact) — nothing happened to them */
+  blocked: { id: number; text: string; keep?: { id: number; text: string } }[];
   more: number; // entries beyond the cap
 }
 
@@ -274,8 +331,8 @@ export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number; p
   const budgetMs = opts.budgetMs ?? MEM_CONSOLIDATE_TIME_BUDGET_MS;
   const parallel = Math.max(1, opts.parallel ?? MEM_CONSOLIDATE_PARALLEL);
   const dryRun = !!opts.dryRun;
-  const diff: ConsolidateDiff = { deleted: [], updated: [], more: 0 };
-  const emptyDiff = (): ConsolidateDiff => ({ deleted: [], updated: [], more: 0 });
+  const emptyDiff = (): ConsolidateDiff => ({ deleted: [], updated: [], blocked: [], more: 0 });
+  const diff: ConsolidateDiff = emptyDiff();
   const all = toKnown(await listMemories(ctx.env, ctx.chatId));
   const total = all.length;
   if (total < 2) return { added: 0, updated: 0, deleted: 0, total, checked: total, passes: 0, partial: false, diff: emptyDiff(), dryRun };
@@ -322,21 +379,21 @@ export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number; p
       const out = outs[w];
       if (out === undefined || isFallbackMessage(out)) { failed = true; continue; } // failed or not settled in time → redone next run
       // A consolidation pass rewrites what exists; it is not a place to invent new facts.
-      const ops = parseMemoryOps(out, windows[w], ctx.cfg.lang, 0);
+      const { ops, blocked } = guardConsolidationDeletes(parseMemoryOps(out, windows[w], ctx.cfg.lang, 0), windows[w]);
       // Record the diff (texts come from the window the model saw) — the reply shows WHAT changed, so a
       // human reviews a short diff instead of the whole list. A dry run stops here: counts, no writes.
       const byId = new Map(windows[w].map(k => [k.id, k]));
-      const room = () => diff.deleted.length + diff.updated.length < MEM_CONSOLIDATE_DIFF_MAX;
+      const room = () => diff.deleted.length + diff.updated.length + diff.blocked.length < MEM_CONSOLIDATE_DIFF_MAX;
       // The kept twin is shown as it will read AFTER the pass (an UPDATE of the same pass wins over the old text);
       // a keep that is itself deleted in this pass is meaningless → omitted.
       const newText = new Map(ops.updates.map(u => [u.id, u.text]));
-      const keepOf = (id: number): { id: number; text: string } | undefined => {
-        const kid = ops.keeps[id];
-        if (kid === undefined || ops.deletes.includes(kid)) return undefined;
+      const keepOf = (kid: number | undefined): { id: number; text: string } | undefined => {
+        if (kid === undefined) return undefined;
         const text = newText.get(kid) ?? byId.get(kid)?.text;
         return text ? { id: kid, text } : undefined;
       };
-      for (const id of ops.deletes) { if (room()) diff.deleted.push({ id, text: byId.get(id)?.text ?? "", keep: keepOf(id) }); else diff.more++; }
+      for (const id of ops.deletes) { if (room()) diff.deleted.push({ id, text: byId.get(id)?.text ?? "", keep: keepOf(ops.keeps[id]) }); else diff.more++; }
+      for (const b of blocked) { if (room()) diff.blocked.push({ id: b.id, text: byId.get(b.id)?.text ?? "", keep: keepOf(b.keep) }); else diff.more++; }
       for (const u of ops.updates) { if (room()) diff.updated.push({ id: u.id, from: byId.get(u.id)?.text ?? "", to: u.text }); else diff.more++; }
       if (dryRun) { updated += ops.updates.length; deleted += ops.deletes.length; passes++; }
       else {

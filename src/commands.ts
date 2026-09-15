@@ -353,13 +353,15 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
       const r = await consolidateMemories(ctx, { dryRun });
       if (!r) return t(lang, "mem_consolidate_fail");
       if (r.total < 2) return t(lang, "mem_consolidate_few", r.total);
-      if (!r.updated && !r.deleted && !r.partial) return t(lang, "mem_consolidate_clean", r.total);
+      if (!r.updated && !r.deleted && !r.partial && !r.diff.blocked.length) return t(lang, "mem_consolidate_clean", r.total);
       const head = t(lang, r.dryRun ? "mem_consolidate_dry" : "mem_consolidate_done", r.updated, r.deleted, r.total, r.checked, r.passes, r.partial ? t(lang, "mem_consolidate_partial") : "");
       // The diff: deleted facts (text, each with the fact that stays in its place when known) and updates
       // (was ⟶ now) — a reviewable list instead of 250 rows.
       const lines: string[] = [head];
       if (r.diff.deleted.length) { lines.push("", t(lang, "mem_consolidate_diff_deleted")); for (const d of r.diff.deleted) { lines.push("— " + d.text); if (d.keep) lines.push(t(lang, "mem_consolidate_diff_keep", d.keep.text)); } }
       if (r.diff.updated.length) { lines.push("", t(lang, "mem_consolidate_diff_updated")); for (const u of r.diff.updated) lines.push("— " + u.from + " ⟶ " + u.to); }
+      // Deletes the guard refused: shown so the reviewer sees what the model WANTED to drop (and would have, without the guard).
+      if (r.diff.blocked.length) { lines.push("", t(lang, "mem_consolidate_diff_blocked")); for (const b of r.diff.blocked) { lines.push("— " + b.text); if (b.keep) lines.push(t(lang, "mem_consolidate_diff_blocked_keep", b.keep.text)); } }
       if (r.diff.more) lines.push(t(lang, "mem_consolidate_diff_more", r.diff.more));
       return lines.join("\n");
     }
