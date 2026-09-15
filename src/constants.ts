@@ -52,5 +52,4 @@ export const MEM_APPLY_PARALLEL = 8;              // memory ops applied concurre
 export const MEM_CONSOLIDATE_MAX_TOKENS = 3000; // response cap for the consolidation pass (≤ ~800 tokens of ops for 40 facts + room for reasoning)
 export const MEM_CONSOLIDATE_DIFF_MAX = 40;       // how many deleted/updated facts the /memory consolidate reply lists (the rest is summarised)
 export const MEM_UPDATE_MIN_RATIO = 0.5;          // an UPDATE may not shrink a fact below this share of its length (compression ≠ correction)
-export const MEM_DELETE_MIN_OVERLAP = 0.34;       // consolidation: a DELETE applies only if the kept fact shares this share of the deleted fact's content stems (same FACT, not just same person)
 export const SUMMARY_MAX_TOKENS = 2000;    // response cap for the /summary digest (auxiliary call; was 1000 — see the NOTE above)

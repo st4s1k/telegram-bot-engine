@@ -1,9 +1,9 @@
-// Memory RECONCILIATION: curation speaks an operation protocol (ADD / UPDATE <id> / DELETE <id>) so
-// long-term memory is not append-only — a stale fact is replaced or removed instead of piling up next
-// to its newer version. Plain lines still mean ADD (a model that ignores the protocol degrades to the
-// old behaviour). Manual facts are protected from LLM passes. /memory consolidate = full pass.
+// Memory RECONCILIATION: curation speaks an operation protocol (ADD / UPDATE <id>) so long-term memory is
+// not append-only — a fact that changed is UPDATEd in place instead of piling up next to its newer
+// version. There is NO DELETE: an LLM pass never removes a fact (only a human does — /memory del/forget).
+// Plain lines still mean ADD (a model that ignores the protocol degrades to the old behaviour). Manual
+// facts are protected from LLM passes. /memory consolidate = full contradiction-repair pass.
 import {
-  factOverlap, guardConsolidationDeletes,
   test, describe, assert,
   makeEnv, makeCtxFor, makeMsg, seedChat, dbMemories,
   FETCH, sse, DEFAULT_CHAT_DATA,
@@ -21,58 +21,57 @@ const K = (id, text, source = "auto") => ({ id, text, source });
 /* ====================================================================== */
 
 describe("parseMemoryOps · protocol", () => {
-  test("ADD / UPDATE / DELETE are parsed; keywords are case-insensitive", () => {
-    const ops = parseMemoryOps("ADD: Стас живёт в Кишинёве\nupdate 7: Вася таксует\nDelete 9", [K(7, "Вася на складе"), K(9, "старое")]);
+  test("ADD / UPDATE are parsed; keywords are case-insensitive", () => {
+    const ops = parseMemoryOps("ADD: Стас живёт в Кишинёве\nupdate 7: Вася таксует", [K(7, "Вася на складе"), K(9, "старое")]);
     assert.deepEqual(ops.adds, ["Стас живёт в Кишинёве"]);
     assert.deepEqual(ops.updates, [{ id: 7, text: "Вася таксует" }]);
-    assert.deepEqual(ops.deletes, [9]);
+  });
+
+  test("DELETE is not an operation: the line is dropped — never applied, never an ADD", () => {
+    const known = [K(7, "Вася на складе"), K(9, "старое")];
+    const ops = parseMemoryOps("Delete 9\nDELETE [7] -> [9]\nDELETE 7, 9\nremove 9\nUPDATE 7: Вася таксует", known);
+    assert.deepEqual(ops, { adds: [], updates: [{ id: 7, text: "Вася таксует" }] });
   });
 
   test("a plain line (no keyword) is an ADD — back-compat with the old append-only output", () => {
     const ops = parseMemoryOps("- живёт в Кишинёве\n2. любит вино\nпросто факт", []);
     assert.deepEqual(ops.adds, ["живёт в Кишинёве", "любит вино", "просто факт"]);
     assert.deepEqual(ops.updates, []);
-    assert.deepEqual(ops.deletes, []);
   });
 
   test("an id the model was NOT shown is a hallucinated reference → dropped", () => {
-    const ops = parseMemoryOps("UPDATE 999: whatever\nDELETE 42", [K(1, "a")]);
+    const ops = parseMemoryOps("UPDATE 999: whatever", [K(1, "a")]);
     assert.deepEqual(ops.updates, []);
-    assert.deepEqual(ops.deletes, []);
   });
 
-  test("manual facts are protected from UPDATE/DELETE (user intent wins)", () => {
+  test("manual facts are protected from UPDATE (user intent wins)", () => {
     const known = [K(3, "я вегетарианец", "manual"), K(4, "auto fact")];
-    const ops = parseMemoryOps("DELETE 3\nUPDATE 3: ест мясо\nDELETE 4", known);
-    assert.deepEqual(ops.deletes, [4]);
-    assert.deepEqual(ops.updates, []);
+    const ops = parseMemoryOps("UPDATE 3: ест мясо\nUPDATE 4: auto fact, corrected", known);
+    assert.deepEqual(ops.updates, [{ id: 4, text: "auto fact, corrected" }]);
   });
 
-  test("UPDATE whose new text already exists as another fact is a MERGE → DELETE of the updated id", () => {
+  test("UPDATE whose new text already exists as another fact is a no-op (it used to be a merge = a delete)", () => {
     const known = [K(1, "Вася таксует"), K(2, "Вася водит такси")];
     const ops = parseMemoryOps("UPDATE 2: Вася таксует", known);
-    assert.deepEqual(ops.updates, []);
-    assert.deepEqual(ops.deletes, [2]);
+    assert.deepEqual(ops, { adds: [], updates: [] });
   });
 
   test("UPDATE to the same text (case-insensitive) is a no-op", () => {
     const ops = parseMemoryOps("UPDATE 1: ВАСЯ ТАКСУЕТ", [K(1, "Вася таксует")]);
     assert.deepEqual(ops.updates, []);
-    assert.deepEqual(ops.deletes, []);
   });
 
   test("one op per id per pass — the first wins", () => {
-    const ops = parseMemoryOps("DELETE 1\nUPDATE 1: x", [K(1, "a")]);
-    assert.deepEqual(ops.deletes, [1]);
-    assert.deepEqual(ops.updates, []);
+    const ops = parseMemoryOps("UPDATE 1: x\nUPDATE 1: y", [K(1, "a")]);
+    assert.deepEqual(ops.updates, [{ id: 1, text: "x" }]);
   });
 
   test("ADD dedups against known facts and within the batch; capped at maxAdds", () => {
     const ops = parseMemoryOps("ADD: a\nADD: A\nADD: known\nb\nc\nd\ne\nf\ng", [K(1, "known")]);
     assert.deepEqual(ops.adds, ["a", "b", "c", "d", "e"]); // 5 = MEM_MAX_FACTS_PER_RUN
-    const zero = parseMemoryOps("ADD: a\nDELETE 1", [K(1, "known")], "en", 0);
+    const zero = parseMemoryOps("ADD: a\nUPDATE 1: known, corrected", [K(1, "known")], "en", 0);
     assert.deepEqual(zero.adds, []);      // maxAdds=0 → a consolidation pass never invents facts
-    assert.deepEqual(zero.deletes, [1]);
+    assert.deepEqual(zero.updates, [{ id: 1, text: "known, corrected" }]);
   });
 
   test("refusals/headings are ignored for ADD and for UPDATE text", () => {
@@ -81,15 +80,14 @@ describe("parseMemoryOps · protocol", () => {
     assert.deepEqual(ops.updates, []);
   });
 
-  test("a stray `- 12` / `-1` is a bullet, not a DELETE (only the DELETE keyword deletes)", () => {
+  test("a stray `- 12` / `-1` is a bullet, not an op", () => {
     const ops = parseMemoryOps("- 12\n-1", [K(1, "a"), K(12, "b")]);
-    assert.deepEqual(ops.deletes, []);
     assert.deepEqual(ops.updates, []);
   });
 
   test("NONE (the explicit nothing-to-do sentinel) yields no ops and is not a fact", () => {
     const ops = parseMemoryOps("NONE", [K(1, "a")]);
-    assert.deepEqual(ops, { adds: [], updates: [], deletes: [], keeps: {} });
+    assert.deepEqual(ops, { adds: [], updates: [] });
     assert.deepEqual(parseMemoryOps("none.", []).adds, []);
   });
 
@@ -141,7 +139,7 @@ describe("storage · updateMemory / deleteMemory", () => {
     assert.equal((await dbMemories(env, 53))[0].text, "b");
   });
 
-  test("updateMemory: text collision with another fact (UNIQUE) → false (caller merges)", async () => {
+  test("updateMemory: text collision with another fact (UNIQUE) → false", async () => {
     const env = ragEnv();
     const ctx = makeCtxFor(makeMsg({ chatId: 54 }), env, { ...DEFAULT_CHAT_DATA() });
     const a = await addMemory(ctx, "one", "auto");
@@ -150,7 +148,7 @@ describe("storage · updateMemory / deleteMemory", () => {
     assert.deepEqual((await dbMemories(env, 54)).map(r => r.text), ["one", "two"]);
   });
 
-  test("deleteMemory returns whether a row went; foreign id is a no-op", async () => {
+  test("deleteMemory (the human path: /memory del) returns whether a row went; foreign id is a no-op", async () => {
     const env = ragEnv();
     const ctx = makeCtxFor(makeMsg({ chatId: 55 }), env, { ...DEFAULT_CHAT_DATA() });
     const id = await addMemory(ctx, "x", "auto");
@@ -181,20 +179,20 @@ describe("runMemoryCuration · reconciles instead of appending", () => {
     return { ctx, job, trip };
   };
 
-  test("UPDATE replaces the stale fact, DELETE removes the obsolete one, ADD adds; boundary advances", async () => {
+  test("UPDATE replaces the stale fact, ADD adds, a DELETE line is ignored; boundary advances", async () => {
     const env = ragEnv();
     const { ctx, job, trip } = await seedTwo(env, 60);
     FETCH.set("chat", () => sse([`UPDATE ${job}: Вася таксует\nDELETE ${trip}\nADD: Вася не любит отпуска`]));
     await runMemoryCuration(ctx);
     const rows = await dbMemories(env, 60);
-    assert.deepEqual(rows.map(r => r.text).sort(), ["Вася не любит отпуска", "Вася таксует"].sort());
-    assert.equal(env._vec.store.size, 2);
+    assert.deepEqual(rows.map(r => r.text).sort(), ["Вася едет в отпуск в мае", "Вася не любит отпуска", "Вася таксует"].sort());
+    assert.equal(env._vec.store.size, 3);
     assert.equal(env._vec.store.get(memVectorId(60, job)).metadata.text, "Вася таксует");
-    assert.equal(env._vec.store.has(memVectorId(60, trip)), false);
+    assert.equal(env._vec.store.has(memVectorId(60, trip)), true); // an LLM pass never deletes
     assert.equal(ctx.chatData._memUptoId, 2);
   });
 
-  test("the extractor is shown known facts WITH their ids (so it can reference them)", async () => {
+  test("the extractor is shown known facts WITH their ids (so it can reference them); the prompt offers no DELETE", async () => {
     const env = ragEnv();
     const { ctx, job } = await seedTwo(env, 61);
     FETCH.set("chat", () => sse(["NONE"]));
@@ -202,6 +200,7 @@ describe("runMemoryCuration · reconciles instead of appending", () => {
     const sys = FETCH.chatBody().messages[0].content;
     assert.ok(sys.includes(`[${job}] Вася работает на складе`), sys);
     assert.ok(/UPDATE <id>/.test(sys));
+    assert.ok(!/DELETE <id>/.test(sys), sys);
   });
 
   test("a model that ignores the protocol (plain lines) still just adds — never silent", async () => {
@@ -248,18 +247,18 @@ describe("runMemoryCuration · reconciles instead of appending", () => {
 /* =====================  /memory consolidate  ========================== */
 /* ====================================================================== */
 
-describe("/memory consolidate · full reconciliation pass", () => {
-  test("merges duplicates and resolves contradictions across the whole list; reports counts", async () => {
+describe("/memory consolidate · full contradiction-repair pass", () => {
+  test("a changed fact is UPDATEd to its current state; nothing is deleted; counts reported", async () => {
     const env = ragEnv();
     const ctx = makeCtxFor(makeMsg({ chatId: 70, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
-    const a = await addMemory(ctx, "Vasya drives a taxi since March", "auto");
-    const b = await addMemory(ctx, "Vasya drives a taxi", "auto");
+    const a = await addMemory(ctx, "Vasya plans laser eye surgery, 4000 euro", "auto");
+    const b = await addMemory(ctx, "Vasya had laser eye surgery", "auto");
     const c = await addMemory(ctx, "Vasya is a taxi driver", "auto");
-    FETCH.set("chat", () => sse([`DELETE ${a} -> ${b}\nUPDATE ${b}: Vasya drives a taxi (since March)\nDELETE ${c} -> ${b}`]));
+    FETCH.set("chat", () => sse([`UPDATE ${a}: Vasya had laser eye surgery, it cost 4000 euro\nDELETE ${b} -> ${a}\nDELETE ${c}`]));
     const out = await runMemory(ctx, "/memory consolidate");
-    assert.match(out, /consolidated: updated 1, deleted 2 \(of 3 facts\)/);
-    assert.deepEqual((await dbMemories(env, 70)).map(r => r.text), ["Vasya drives a taxi (since March)"]);
-    assert.equal(env._vec.store.size, 1);
+    assert.match(out, /consolidated: updated 1 \(of 3 facts\)/);
+    assert.deepEqual((await dbMemories(env, 70)).map(r => r.text), ["Vasya had laser eye surgery, it cost 4000 euro", "Vasya had laser eye surgery", "Vasya is a taxi driver"]);
+    assert.equal(env._vec.store.size, 3);
   });
 
   test("a consolidation pass never invents facts (ADD lines are ignored)", async () => {
@@ -274,12 +273,12 @@ describe("/memory consolidate · full reconciliation pass", () => {
   test("works with rag OFF (explicit user action, like /memory add)", async () => {
     const env = makeEnv(); // no ENABLE_RAG
     const ctx = makeCtxFor(makeMsg({ chatId: 72, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
-    const a = await addMemory(ctx, "Vasya likes cheese a lot", "auto");
-    const b = await addMemory(ctx, "Vasya likes cheese", "auto");
-    FETCH.set("chat", () => sse([`DELETE ${b} -> ${a}`]));
+    const a = await addMemory(ctx, "Vasya likes cheese", "auto");
+    FETCH.set("chat", () => sse([`UPDATE ${a}: Vasya likes cheese a lot`]));
+    await addMemory(ctx, "Vasya has a cat", "auto");
     const out = await runMemory(ctx, "/memory consolidate");
-    assert.match(out, /deleted 1/);
-    assert.deepEqual((await dbMemories(env, 72)).map(r => r.id), [a]);
+    assert.match(out, /updated 1/);
+    assert.equal((await dbMemories(env, 72)).find(r => r.id === a).text, "Vasya likes cheese a lot");
   });
 
   test("already tidy (no ops) / too few facts / LLM failure → distinct messages, nothing changed", async () => {
@@ -298,10 +297,10 @@ describe("/memory consolidate · full reconciliation pass", () => {
     const env = ragEnv();
     const ctx = makeCtxFor(makeMsg({ chatId: 74 }), env, { ...DEFAULT_CHAT_DATA() });
     const m = await addMemory(ctx, "keep me", "manual");
-    const a = await addMemory(ctx, "keep me too", "auto");
-    FETCH.set("chat", () => sse([`DELETE ${m} -> ${a}\nDELETE ${a} -> ${m}`]));
+    await addMemory(ctx, "auto", "auto");
+    FETCH.set("chat", () => sse([`UPDATE ${m}: keep me not`]));
     await runMemory(ctx, "/memory consolidate");
-    assert.deepEqual((await dbMemories(env, 74)).map(r => r.id), [m]);
+    assert.deepEqual((await dbMemories(env, 74)).map(r => r.text), ["keep me", "auto"]);
   });
 
   test("RU alias `/memory свести` routes to consolidate", async () => {
@@ -317,19 +316,19 @@ describe("/memory consolidate · full reconciliation pass", () => {
     const ctx = makeCtxFor(makeMsg({ chatId: 76 }), env, { ...DEFAULT_CHAT_DATA() });
     await addMemory(ctx, "a", "auto"); await addMemory(ctx, "b", "auto");
     ctx._preview = true;
-    FETCH.set("chat", () => sse(["DELETE 1\nDELETE 2"]));
+    FETCH.set("chat", () => sse(["UPDATE 1: x\nUPDATE 2: y"]));
     assert.equal(await consolidateMemories(ctx), null);
     assert.equal(FETCH.of("/chat/completions").length, 0);
     assert.equal((await dbMemories(env, 76)).length, 2);
   });
 
-  test("applyMemoryOps order: deletes → updates → adds (a merge never races its own update)", async () => {
+  test("applyMemoryOps: updates then adds; counts what actually went through", async () => {
     const env = ragEnv();
     const ctx = makeCtxFor(makeMsg({ chatId: 77 }), env, { ...DEFAULT_CHAT_DATA() });
     const a = await addMemory(ctx, "a", "auto");
-    const r = await applyMemoryOps(ctx, { deletes: [a], updates: [{ id: a, text: "ghost" }], adds: ["new"] });
-    assert.deepEqual(r, { added: 1, updated: 0, deleted: 1 });
-    assert.deepEqual((await dbMemories(env, 77)).map(x => x.text), ["new"]);
+    const r = await applyMemoryOps(ctx, { updates: [{ id: a, text: "a, corrected" }, { id: 999, text: "ghost" }], adds: ["new"] });
+    assert.deepEqual(r, { added: 1, updated: 1 });
+    assert.deepEqual((await dbMemories(env, 77)).map(x => x.text), ["a, corrected", "new"]);
   });
 });
 
@@ -349,18 +348,19 @@ describe("/memory consolidate · loops over windows, resumes from the KV cursor"
     return ids;
   }
   const prompts = () => FETCH.of("/chat/completions").map(c => c.body.messages[0].content);
+  const textOf = async (env, chatId, id) => (await dbMemories(env, chatId)).find(r => r.id === id).text;
 
   test("a clean first window (NONE) does not stop the run: the second window is processed in the same call", async () => {
     const env = ragEnv();
     const ctx = makeCtxFor(makeMsg({ chatId: 75, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
     const ids = await seed45(ctx);
     let n = 0;
-    FETCH.set("chat", () => sse([++n === 1 ? "NONE" : `DELETE ${ids[40]} -> ${ids[41]}`]));
+    FETCH.set("chat", () => sse([++n === 1 ? "NONE" : `UPDATE ${ids[40]}: fact 40, corrected`]));
     const out = await runMemory(ctx, "/memory consolidate");
     assert.equal(n, 2);                                    // two windows → two passes
-    assert.match(out, /deleted 1 \(of 45 facts\) — checked 45, passes: 2/);
+    assert.match(out, /updated 1 \(of 45 facts\) — checked 45, passes: 2/);
     assert.ok(!/Ran out of time/.test(out));               // complete → no partial suffix
-    assert.equal((await dbMemories(env, 75)).length, 44);
+    assert.equal(await textOf(env, 75, ids[40]), "fact 40, corrected");
     assert.ok(!env._kv.store.has(CURSOR(75)));             // finished → cursor cleared
     // each window saw only its own ids
     const [p1, p2] = prompts();
@@ -373,9 +373,9 @@ describe("/memory consolidate · loops over windows, resumes from the KV cursor"
     const ctx = makeCtxFor(makeMsg({ chatId: 76, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
     const ids = await seed45(ctx);
     let n = 0;
-    FETCH.set("chat", () => (++n === 1 ? sse([`DELETE ${ids[3]} -> ${ids[4]}`]) : sse([], { ok: false, status: 500 })));
+    FETCH.set("chat", () => (++n === 1 ? sse([`UPDATE ${ids[3]}: fact 3, corrected`]) : sse([], { ok: false, status: 500 })));
     const out = await runMemory(ctx, "/memory consolidate");
-    assert.match(out, /deleted 1 \(of 45 facts\) — checked 40, passes: 1/); // progress of pass 1 kept
+    assert.match(out, /updated 1 \(of 45 facts\) — checked 40, passes: 1/); // progress of pass 1 kept
     assert.match(out, /Ran out of time/);                                     // reported as partial
     assert.equal(env._kv.store.get(CURSOR(76)), String(ids[39]));            // cursor = last id of window 1
 
@@ -433,10 +433,10 @@ describe("/memory consolidate · loops over windows, resumes from the KV cursor"
     const ctx = makeCtxFor(makeMsg({ chatId: 81, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
     const ids = await seed45(ctx);
     let n = 0;
-    FETCH.set("chat", () => (++n === 1 ? sse([], { ok: false, status: 500 }) : sse([`DELETE ${ids[44]} -> ${ids[43]}`])));
+    FETCH.set("chat", () => (++n === 1 ? sse([], { ok: false, status: 500 }) : sse([`UPDATE ${ids[44]}: fact 44, corrected`])));
     const r = await consolidateMemories(ctx);
     assert.equal(r.passes, 1);                                  // window 2 succeeded and was applied…
-    assert.equal((await dbMemories(env, 81)).length, 44);
+    assert.equal(await textOf(env, 81, ids[44]), "fact 44, corrected");
     assert.equal(r.checked, 0);                                 // …but window 1 failed → cursor stays at the start
     assert.equal(r.partial, true);
     assert.ok(!env._kv.store.has(CURSOR(81)));                  // cursor 0 → no key (start over next time)
@@ -462,14 +462,14 @@ describe("/memory consolidate · round deadline", () => {
     for (let i = 0; i < 45; i++) ids.push(await addMemory(ctx, "fact " + i, "auto"));
     let n = 0;
     FETCH.set("chat", async () => {
-      if (++n === 1) return sse([`DELETE ${ids[3]} -> ${ids[4]}`]);          // window 1: fast
+      if (++n === 1) return sse([`UPDATE ${ids[3]}: fact 3, corrected`]);  // window 1: fast
       await new Promise(r => setTimeout(r, 400)); return sse(["NONE"]);   // window 2: stuck past the deadline
     });
     const t0 = Date.now();
     const r = await consolidateMemories(ctx, { budgetMs: 0, roundMs: 100 });
     assert.ok(Date.now() - t0 < 350, "the round ended at the deadline, not when the stuck window finished");
     assert.equal(r.passes, 1);                                   // window 1 applied…
-    assert.equal((await dbMemories(env, 82)).length, 44);
+    assert.equal((await dbMemories(env, 82)).find(x => x.id === ids[3]).text, "fact 3, corrected");
     assert.equal(r.checked, 40);                                 // …window 2 is left for the next run
     assert.equal(r.partial, true);
     assert.equal(env._kv.store.get("consolidate:82"), String(ids[39]));
@@ -477,19 +477,16 @@ describe("/memory consolidate · round deadline", () => {
 });
 
 describe("parseMemoryOps · id spelling tolerance", () => {
-  test("ids written as [id] / #id and DELETE lists are understood (deepseek echoes the [id] it was shown)", () => {
-    const known = [K(1, "one"), K(2, "two"), K(3, "three"), K(4, "four"), K(5, "five")];
-    const ops = parseMemoryOps("DELETE [2]\nUPDATE [1]: one, corrected\nDELETE #3\nDELETE 4, [5]", known, "en", 0);
-    assert.deepEqual(ops.deletes, [2, 3, 4, 5]);
-    assert.deepEqual(ops.updates, [{ id: 1, text: "one, corrected" }]);
+  test("ids written as [id] / #id are understood (deepseek echoes the [id] it was shown)", () => {
+    const known = [K(1, "one"), K(2, "two"), K(3, "three")];
+    const ops = parseMemoryOps("UPDATE [1]: one, corrected\nUPDATE #2: two, corrected\nUPDATE [ 3 ]: three, corrected", known, "en", 0);
+    assert.deepEqual(ops.updates, [{ id: 1, text: "one, corrected" }, { id: 2, text: "two, corrected" }, { id: 3, text: "three, corrected" }]);
     assert.deepEqual(ops.adds, []);
   });
   test("a protocol line that does not parse never turns into an ADD", () => {
     const known = [K(1, "one")];
-    const ops = parseMemoryOps("UPDATE 1 no colon here\nDELETE all\nDELETE [999]", known, "en", 5);
-    assert.deepEqual(ops.adds, []);
-    assert.deepEqual(ops.updates, []);
-    assert.deepEqual(ops.deletes, []); // 999 was not shown → hallucinated id, dropped
+    const ops = parseMemoryOps("UPDATE 1 no colon here\nDELETE all\nDELETE [999]\nUPDATE [999]: ghost", known, "en", 5);
+    assert.deepEqual(ops, { adds: [], updates: [] });
   });
 });
 
@@ -497,15 +494,15 @@ describe("/memory consolidate · finish_reason=length", () => {
   test("a pass cut by max_tokens: its LAST line is dropped, the complete lines before it are applied", async () => {
     const env = ragEnv();
     const ctx = makeCtxFor(makeMsg({ chatId: 91, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
-    const a = await addMemory(ctx, "Vasya keeps a cat", "auto");
-    const b = await addMemory(ctx, "Vasya keeps a cat at home", "auto");
+    await addMemory(ctx, "one", "auto");
+    const b = await addMemory(ctx, "two", "auto");
     const c = await addMemory(ctx, "three", "auto");
     // SSE with finish_reason=length: the reply ends mid-UPDATE
-    const body = `DELETE ${b} -> ${a}\nUPDATE ${c}: three became something lon`;
+    const body = `UPDATE ${b}: two, fully stated\nUPDATE ${c}: three became something lon`;
     FETCH.set("chat", () => sse([], { raw: "data: " + JSON.stringify({ choices: [{ delta: { content: body }, finish_reason: "length" }] }) + "\ndata: [DONE]" }));
     const out = await runMemory(ctx, "/memory consolidate");
-    assert.match(out, /deleted 1/);
-    assert.deepEqual((await dbMemories(env, 91)).map(r => r.text), ["Vasya keeps a cat", "three"]); // UPDATE c NOT applied
+    assert.match(out, /updated 1/);
+    assert.deepEqual((await dbMemories(env, 91)).map(r => r.text), ["one", "two, fully stated", "three"]); // UPDATE c NOT applied
   });
   test("finish_reason=stop: the last line is a normal op", async () => {
     const env = ragEnv();
@@ -518,62 +515,60 @@ describe("/memory consolidate · finish_reason=length", () => {
   });
 });
 describe("applyMemoryOps · concurrency", () => {
-  test("deletes of one pass are applied concurrently (several D1 deletes in flight at once)", async () => {
+  test("updates of one pass are applied concurrently (several re-embeds/upserts in flight at once)", async () => {
     const env = ragEnv();
     const ctx = makeCtxFor(makeMsg({ chatId: 90 }), env, { ...DEFAULT_CHAT_DATA() });
     const ids = [];
     for (let i = 0; i < 6; i++) ids.push(await addMemory(ctx, "f" + i, "auto"));
-    // instrument the vector delete (called once per deleted fact) to observe overlap
+    // instrument the vector upsert (called once per updated fact) to observe overlap
     let inFlight = 0, maxInFlight = 0;
-    const orig = env.VECTORIZE.deleteByIds.bind(env.VECTORIZE);
-    env.VECTORIZE.deleteByIds = async (v) => { inFlight++; maxInFlight = Math.max(maxInFlight, inFlight); await new Promise(r => setTimeout(r, 15)); inFlight--; return orig(v); };
-    const res = await applyMemoryOps(ctx, { adds: [], updates: [], deletes: ids });
-    assert.equal(res.deleted, 6);
-    assert.ok(maxInFlight > 1, "expected overlapping deletes, got " + maxInFlight);
-    assert.equal((await dbMemories(env, 90)).length, 0);
+    const orig = env.VECTORIZE.upsert.bind(env.VECTORIZE);
+    env.VECTORIZE.upsert = async (v) => { inFlight++; maxInFlight = Math.max(maxInFlight, inFlight); await new Promise(r => setTimeout(r, 15)); inFlight--; return orig(v); };
+    const res = await applyMemoryOps(ctx, { adds: [], updates: ids.map((id, i) => ({ id, text: "f" + i + " corrected" })) });
+    assert.equal(res.updated, 6);
+    assert.ok(maxInFlight > 1, "expected overlapping updates, got " + maxInFlight);
+    assert.deepEqual((await dbMemories(env, 90)).map(r => r.text), ids.map((_, i) => "f" + i + " corrected"));
   });
 });
 
 describe("/memory consolidate · dry run · preview + diff in the reply", () => {
-  test("dry: reply lists what WOULD be deleted/updated, nothing is written, no cursor", async () => {
+  test("dry: reply lists what WOULD be updated (was ⟶ now), nothing is written, no cursor", async () => {
     const env = ragEnv();
     const ctx = makeCtxFor(makeMsg({ chatId: 93, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
     const a = await addMemory(ctx, "Vasya drives a taxi", "auto");
-    const b = await addMemory(ctx, "Vasya is a taxi driver", "auto");
-    FETCH.set("chat", () => sse([`UPDATE ${a}: Vasya drives a taxi (since March)\nDELETE ${b} -> ${a}`]));
+    await addMemory(ctx, "Vasya is a taxi driver", "auto");
+    FETCH.set("chat", () => sse([`UPDATE ${a}: Vasya drives a taxi (since March)`]));
     const out = await runMemory(ctx, "/memory consolidate dry");
     assert.match(out, /Dry run/);
-    assert.match(out, /updated 1, deleted 1/);
-    assert.ok(out.includes("Vasya is a taxi driver"));                        // deleted text shown
+    assert.match(out, /updated 1 \(of 2 facts\)/);
     assert.ok(out.includes("Vasya drives a taxi ⟶ Vasya drives a taxi (since March)")); // was ⟶ now
     assert.deepEqual((await dbMemories(env, 93)).map(r => r.text), ["Vasya drives a taxi", "Vasya is a taxi driver"]); // untouched
     assert.ok(!env._kv.store.has("consolidate:93"));
   });
-  test("real run: the reply carries the same diff and the changes are applied", async () => {
+  test("real run: the reply carries the same diff and the change is applied", async () => {
     const env = ragEnv();
     const ctx = makeCtxFor(makeMsg({ chatId: 94, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
     const a = await addMemory(ctx, "keep", "auto");
-    const b = await addMemory(ctx, "keep twin", "auto");
-    FETCH.set("chat", () => sse([`DELETE ${b} -> ${a}`]));
+    await addMemory(ctx, "other", "auto");
+    FETCH.set("chat", () => sse([`UPDATE ${a}: keep, corrected`]));
     const out = await runMemory(ctx, "/memory consolidate");
-    assert.match(out, /Memory consolidated: updated 0, deleted 1/);
-    assert.ok(out.includes("Deleted:") && out.includes("keep twin"));
-    assert.deepEqual((await dbMemories(env, 94)).map(r => r.text), ["keep"]);
+    assert.match(out, /Memory consolidated: updated 1/);
+    assert.ok(out.includes("Updated (was ⟶ now):") && out.includes("keep ⟶ keep, corrected"));
+    assert.deepEqual((await dbMemories(env, 94)).map(r => r.text), ["keep, corrected", "other"]);
   });
 });
 
 describe("parseMemoryOps · an UPDATE that shrinks a fact is compression, not a correction", () => {
-  test("shrinking below half the length is skipped; a same-size rewording and a merge still work", () => {
+  test("shrinking below half the length is skipped; a same-size rewording works; a text equal to another fact is a no-op", () => {
     const long = "Стас принимает фенибут по назначению врача (500 мг утром и 500 мг в обед), плюс глицин и 3 мг мелатонина перед сном.";
     const known = [K(1, long), K(2, "Лиза любит сыр"), K(3, "Лиза обожает сыр")];
     const ops = parseMemoryOps(`UPDATE 1: Стас принимает фенибут, глицин и мелатонин.\nUPDATE 2: Лиза любит сыр (очень)\nUPDATE 3: Лиза любит сыр`, known, "en", 0);
-    assert.deepEqual(ops.updates, [{ id: 2, text: "Лиза любит сыр (очень)" }]); // 1 skipped (shrunk), 3 merged
-    assert.deepEqual(ops.deletes, [3]);                                         // merge → delete of the twin
+    assert.deepEqual(ops.updates, [{ id: 2, text: "Лиза любит сыр (очень)" }]); // 1 skipped (shrunk), 3 no-op
   });
 });
 
 describe("/memory consolidate · today's date is in the consolidation prompt", () => {
-  test("the system prompt carries YYYY-MM-DD so passed vs future plans can be told apart", async () => {
+  test("the system prompt carries YYYY-MM-DD so passed vs future plans can be told apart; no DELETE is offered", async () => {
     const env = ragEnv();
     const ctx = makeCtxFor(makeMsg({ chatId: 95, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
     await addMemory(ctx, "a", "auto"); await addMemory(ctx, "b", "auto");
@@ -581,106 +576,35 @@ describe("/memory consolidate · today's date is in the consolidation prompt", (
     await runMemory(ctx, "/memory consolidate");
     const sys = FETCH.chatBody().messages[0].content;
     assert.match(sys, /Today is \d{4}-\d{2}-\d{2}\./);
+    assert.ok(!/DELETE <id>/.test(sys), sys);
   });
 });
 
-describe("parseMemoryOps · keeps · the fact that stays in place of a deleted one", () => {
-  test("DELETE <id> -> <keepId> (bare, [id], #id, → / => arrows, several ids) records the kept id", () => {
-    const known = [K(1, "a"), K(2, "b"), K(3, "c"), K(4, "d"), K(5, "e")];
-    const ops = parseMemoryOps("DELETE [3] -> [2]\nDELETE #4 → 1\nDELETE 5 => #1", known, "en", 0);
-    assert.deepEqual(ops.deletes, [3, 4, 5]);
-    assert.deepEqual(ops.keeps, { 3: 2, 4: 1, 5: 1 });
-    const multi = parseMemoryOps("DELETE 2, 3 -> 1", known, "en", 0);
-    assert.deepEqual(multi.deletes, [2, 3]);
-    assert.deepEqual(multi.keeps, { 2: 1, 3: 1 });
-  });
-  test("an unknown or self keep id is ignored (the delete still applies); a plain DELETE has no keep", () => {
-    const known = [K(1, "a"), K(2, "b"), K(3, "c")];
-    const ops = parseMemoryOps("DELETE 1 -> 999\nDELETE 2 -> 2\nDELETE 3", known, "en", 0);
-    assert.deepEqual(ops.deletes, [1, 2, 3]);
-    assert.deepEqual(ops.keeps, {});
-  });
-  test("a merge (UPDATE whose text equals another fact) keeps the twin — a known one or one UPDATEd earlier in the batch", () => {
-    const known = [K(1, "Liza loves cheese"), K(2, "Liza adores cheese"), K(3, "Liza likes cheese"), K(4, "x")];
-    const ops = parseMemoryOps("UPDATE 2: Liza loves cheese\nUPDATE 4: Liza loves cheese and wine\nUPDATE 3: Liza loves cheese and wine", known, "en", 0);
-    assert.deepEqual(ops.deletes, [2, 3]);
-    assert.deepEqual(ops.keeps, { 2: 1, 3: 4 });
-  });
-});
-
-describe("/memory consolidate · diff shows the kept fact next to each deletion", () => {
-  test("dry run: `↳ kept:` line under the deleted text, carrying the kept fact AS IT WILL READ after the pass", async () => {
+// The reason there is no DELETE — the pairs a live dry run produced (2026-09-15): the model called any two
+// facts about the same PERSON "duplicates" and asked to drop the informative one. None of that can happen now.
+describe("an LLM pass never deletes · the live failure modes are inert", () => {
+  test("DELETE with a pair, a bare DELETE and a merge-UPDATE onto an unrelated fact all leave the facts intact", async () => {
     const env = ragEnv();
-    const ctx = makeCtxFor(makeMsg({ chatId: 96, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
-    const a = await addMemory(ctx, "Vasya drives a taxi", "auto");
-    const b = await addMemory(ctx, "Vasya is a taxi driver", "auto");
-    const c = await addMemory(ctx, "Vasya owns a black cat", "auto");
-    const d = await addMemory(ctx, "Vasya owns a cat", "auto");
-    FETCH.set("chat", () => sse([`UPDATE ${a}: Vasya drives a taxi (since March)\nDELETE ${b} -> ${a}\nDELETE ${d} -> ${c}`]));
-    const out = await runMemory(ctx, "/memory consolidate dry");
-    const lines = out.split("\n");
-    const iB = lines.indexOf("— Vasya is a taxi driver");
-    assert.ok(iB > 0, out);
-    assert.equal(lines[iB + 1], "  ↳ kept: Vasya drives a taxi (since March)"); // the UPDATEd text, not the old one
-    const iD = lines.indexOf("— Vasya owns a cat");
-    assert.equal(lines[iD + 1], "  ↳ kept: Vasya owns a black cat");
-    assert.deepEqual((await dbMemories(env, 96)).length, 4); // dry: untouched
-  });
-  test("a plain DELETE, or one whose keep is itself deleted in the pass, is BLOCKED: nothing deleted, reported under the guard header", async () => {
-    const env = ragEnv();
-    const ctx = makeCtxFor(makeMsg({ chatId: 97, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
-    await addMemory(ctx, "keep", "auto");
-    const b = await addMemory(ctx, "keep twin", "auto");
-    const c = await addMemory(ctx, "keep twin two", "auto");
-    FETCH.set("chat", () => sse([`DELETE ${b} -> ${c}\nDELETE ${c}`]));
+    const ctx = makeCtxFor(makeMsg({ chatId: 98, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "ru" } });
+    const texts = [
+      "Глеб проектирует интерфейсы",
+      "Глеб хокаге, графический дизайнер, пережил лимфому, геймер",
+      "Стас избегает незнакомых девушек на улице из-за социальной тревожности.",
+      "Стас водомут",
+      "Глеб работает удалённо.",
+      "Стас работает разработчиком промышленных программ.",
+    ];
+    const ids = [];
+    for (const tx of texts) ids.push(await addMemory(ctx, tx, "auto"));
+    FETCH.set("chat", () => sse([[
+      `DELETE ${ids[0]} -> ${ids[1]}`,
+      `UPDATE ${ids[2]}: Стас водомут`,
+      `DELETE ${ids[4]}`,
+      `DELETE ${ids[5]}, ${ids[3]} -> ${ids[0]}`,
+    ].join("\n")]));
     const out = await runMemory(ctx, "/memory consolidate");
-    assert.match(out, /updated 0, deleted 0/);
-    assert.ok(out.includes("Not deleted") && out.includes("— keep twin\n") && out.includes("— keep twin two"), out);
-    assert.ok(out.includes("↳ it proposed keeping instead: keep twin two"), out); // b's proposed pair is shown, c has none
-    assert.deepEqual((await dbMemories(env, 97)).map(r => r.text), ["keep", "keep twin", "keep twin two"]);
-  });
-});
-
-// The delete guard, on the pairs a live dry run produced (2026-09-15): the model called facts about the same
-// PERSON "duplicates". Only genuine twins / superseded facts overlap in content stems (names excluded).
-describe("guardConsolidationDeletes · a DELETE needs a pair that is the SAME fact", () => {
-  test("factOverlap: real twins / superseded facts score high, same-person-different-fact scores 0", () => {
-    const hi = [
-      ["Лиза планирует сделать лазерную коррекцию зрения, операция стоит 4000 евро, и она будет оплачивать частями.", "Лиза сделала лазерную коррекцию зрения; операция стоила 4000 евро, она оплачивала частями."],
-      ["Серый работает с блокчейн-проектами и покрывает в схемах все детали процессов, включая смену статусов задач.", "Серого уволили с работы; до этого он работал с блокчейн-проектами и покрывал в схемах все детали процессов, включая смену статусов задач."],
-      ["Глеб играет с Аней в Killing Floor 2.", "Глеб играет с Аней в Killing Floor 2 и предлагает компании протестировать игру."],
-      ["У Глеба установлены сетки на окнах.", "У Глеба стоят сетки на окнах и он включает фумигатор от комаров, так как испытывает сильную аллергическую реакцию на укусы комаров."],
-      ["Лизу уволили из банка", "Лиза работает в банке"],
-      ["Серый планирует уволить Олега", "Серый уволил Олега"],
-    ];
-    for (const [d, k] of hi) assert.ok(factOverlap(d, k) >= 0.34, d);
-    const lo = [
-      ["Глеб проектирует интерфейсы", "Глеб хокаге, графический дизайнер, пережил лимфому, геймер, любит Как Я Встретил Вашу Маму"],
-      ["Стас избегает незнакомых девушек на улице из-за социальной тревожности.", "Стас водомут"],
-      ["Александр, нанятый на место Глеба после его увольнения, проработал ровно три дня и уволился.", "Жека предлагает Глебу вернуться на прежнюю работу за полуторный оклад."],
-      ["Стас не верит в «энергию жизни» и подобные концепции, считая духовность изучением внутреннего мира без связи с магией или верой в бога.", "у Стаса низкий IQ, короткий attention span, и дислексия"],
-      ["Лена смотрела «Сумерки» целиком против своей воли, их показала ей Диана, и не один раз.", "Белла и сумерек воняет постоянно"],
-    ];
-    for (const [d, k] of lo) assert.ok(factOverlap(d, k) < 0.34, d);
-  });
-  test("no pair → blocked; unrelated pair → blocked; pair deleted in the same pass → blocked; a real twin passes", () => {
-    const known = [K(1, "Лиза любит сыр"), K(2, "Лиза обожает сыр"), K(3, "Лиза избегает незнакомых"), K(4, "Лиза водомут"), K(5, "Лиза любит сыр очень")];
-    const ops = { adds: [], updates: [], deletes: [1, 3, 5, 2], keeps: { 1: 2, 3: 4, 5: 2 } }; // 2 has no keep and is deleted → 1 and 5 lose their pair too
-    const g = guardConsolidationDeletes(ops, known);
-    assert.deepEqual(g.ops.deletes, []);
-    assert.deepEqual(g.blocked, [{ id: 1, keep: 2 }, { id: 3, keep: 4 }, { id: 5, keep: 2 }, { id: 2 }]);
-    const ok = guardConsolidationDeletes({ adds: [], updates: [], deletes: [1], keeps: { 1: 2 } }, known);
-    assert.deepEqual(ok.ops.deletes, [1]); assert.deepEqual(ok.ops.keeps, { 1: 2 }); assert.deepEqual(ok.blocked, []);
-  });
-  test("the pair is judged by the kept fact AS UPDATED in the same pass (a merge-UPDATE that absorbs the deleted one passes)", () => {
-    const known = [K(1, "Лиза сделала коррекцию зрения"), K(2, "Лиза планирует коррекцию зрения за 4000 евро")];
-    const ops = { adds: [], updates: [{ id: 1, text: "Лиза сделала коррекцию зрения за 4000 евро" }], deletes: [2], keeps: { 2: 1 } };
-    assert.deepEqual(guardConsolidationDeletes(ops, known).ops.deletes, [2]);
-  });
-  test("a merge by UPDATE (text equal to an unrelated twin) is blocked too — the deleted text is what is compared", () => {
-    const known = [K(1, "Стас водомут"), K(2, "Стас избегает незнакомых девушек на улице")];
-    const ops = parseMemoryOps("UPDATE 2: Стас водомут", known, "en", 0); // parser: merge → delete 2, keep 1
-    assert.deepEqual(ops.deletes, [2]);
-    assert.deepEqual(guardConsolidationDeletes(ops, known).ops.deletes, []);
+    assert.match(out, /в порядке/); // nothing to apply → "already tidy"
+    assert.deepEqual((await dbMemories(env, 98)).map(r => r.text), texts);
+    assert.equal(env._vec.store.size, 6);
   });
 });

@@ -4,18 +4,20 @@
 //    RECONCILE them with what is already remembered. Under cfg.rag, best-effort. Called once a day
 //    (cron) and before the /summary command — NOT on every bot reply.
 //  • consolidateMemories — an explicit full pass over ALL of a chat's facts (/memory consolidate):
-//    merge duplicates, resolve contradictions, drop the obsolete. No new messages involved.
+//    repair contradictions (a fact that changed is UPDATEd to its current state). No new messages involved.
 //
-// Both speak the same OPERATION PROTOCOL to the model (see parseMemoryOps). Memory is therefore not
-// append-only: a stale fact gets replaced (UPDATE) or removed (DELETE) instead of piling up next to
-// its newer version — which is what kept degrading recall into contradictions over months.
-// Manual facts (/memory add) are never modified by an LLM pass: user intent wins; `/memory del` exists.
+// Both speak the same OPERATION PROTOCOL to the model (see parseMemoryOps): ADD and UPDATE. There is NO
+// DELETE — an LLM pass never removes a fact. Recall is contextual (top-k by similarity), so a stale or
+// trivial fact costs nothing, while a wrongly deleted one is gone for good — and live runs showed the
+// model calling any two facts about the same person "duplicates". Only a human deletes (/memory del,
+// /memory forget, the mechanical exact-text /memory dedupe). A fact that changed is UPDATEd in place.
+// Manual facts (/memory add) are never modified by an LLM pass: user intent wins.
 
 import {
   MEM_CURATION_MIN_NEW, MEM_MAX_FACTS_PER_RUN, MEM_MAX_FACT_CHARS, MEM_MAX_TOKENS,
-  MEM_KNOWN_SHOWN, MEM_CONSOLIDATE_MAX, MEM_CONSOLIDATE_MAX_TOKENS, MEM_CONSOLIDATE_TIME_BUDGET_MS, MEM_CONSOLIDATE_PARALLEL, MEM_CONSOLIDATE_ROUND_FLOOR_MS, MEM_APPLY_PARALLEL, MEM_CONSOLIDATE_DIFF_MAX, MEM_UPDATE_MIN_RATIO, MEM_DELETE_MIN_OVERLAP,
+  MEM_KNOWN_SHOWN, MEM_CONSOLIDATE_MAX, MEM_CONSOLIDATE_MAX_TOKENS, MEM_CONSOLIDATE_TIME_BUDGET_MS, MEM_CONSOLIDATE_PARALLEL, MEM_CONSOLIDATE_ROUND_FLOOR_MS, MEM_APPLY_PARALLEL, MEM_CONSOLIDATE_DIFF_MAX, MEM_UPDATE_MIN_RATIO,
 } from "./constants";
-import { messagesSince, addMemory, listMemories, updateMemory, deleteMemory } from "./storage";
+import { messagesSince, addMemory, listMemories, updateMemory } from "./storage";
 import { runLLMWithHistory } from "./llm";
 import { buildMemoryExtractionPrompt, buildMemoryConsolidationPrompt } from "./prompts";
 import { isFallbackMessage, tzStamp } from "./utils";
@@ -27,22 +29,19 @@ import type { Ctx, Memory } from "./types";
 export interface MemoryOps {
   adds: string[];
   updates: { id: number; text: string }[];
-  deletes: number[];
-  /** deleted id → the id of the fact that stays in its place (`DELETE 3 -> 2`, or the twin an UPDATE merged into) */
-  keeps: Record<number, number>;
 }
 
-export interface ApplyResult { added: number; updated: number; deleted: number }
+export interface ApplyResult { added: number; updated: number }
 
-// A known fact as shown to the model: `[id] text`. Only ids in this list may be UPDATEd/DELETEd.
+// A known fact as shown to the model: `[id] text`. Only ids in this list may be UPDATEd.
 export interface KnownFact { id: number; text: string; source: string }
 
 const RE_ADD    = /^add\s*:\s*(.*)$/i;
-// The model may echo ids the way it saw them — `[182]` — or as `#182`; DELETE may list several ids.
+// The model may echo ids the way it saw them — `[182]` — or as `#182`.
 const RE_UPDATE = /^update\s+#?\[?\s*(\d+)\s*\]?\s*:\s*(.*)$/i;
-// `DELETE 3 -> 2` names the fact that stays (the kept twin / the newer state) — shown next to the deletion in the diff.
-const RE_DELETE = /^delete\s+([#\[\]\d,\s]+?)\s*(?:(?:->|=>|→|⇒)\s*#?\[?\s*(\d+)\s*\]?)?\s*$/i; // ids extracted with /\d+/g
-const RE_OP_WORD = /^(?:delete|update)\b/i;         // a protocol line that failed to parse must never become an ADD
+// A protocol-shaped line that is not a valid UPDATE — a malformed one, or a DELETE (which does not exist:
+// an LLM pass never deletes) — is dropped, never treated as an ADD.
+const RE_OP_WORD = /^(?:delete|update|remove)\b/i;
 
 // Normalize one candidate fact line: strip a real list marker, drop headings/refusals, cap length.
 // Returns "" when the line carries no fact. Shared by the plain-line (ADD) path and UPDATE texts.
@@ -63,13 +62,15 @@ function cleanFactLine(rawLine: string, refusalStarts: string[], refusalContains
 const normKey = (s: string): string => s.trim().toLowerCase();
 
 // Parse the model's output into operations. Tolerant by design:
-//  • `ADD: text`, `UPDATE <id>: text`, `DELETE <id>` — the protocol (case-insensitive keywords);
+//  • `ADD: text`, `UPDATE <id>: text` — the protocol (case-insensitive keywords);
+//  • `DELETE …` is NOT an operation: the line is dropped (an LLM pass never deletes — see the header);
 //  • any other non-empty line is treated as a plain ADD — so a model that ignores the protocol
 //    degrades exactly to the old append-only behaviour, never to silence.
 // Rules: an id must be one of `known` (the facts the model was shown) — anything else is a
-// hallucinated reference and is dropped; `manual` facts are protected from UPDATE/DELETE; an UPDATE
-// whose new text already exists as another fact is a MERGE → becomes a DELETE of the updated id;
-// ADD texts are deduped against known facts and within the batch and capped at `maxAdds`.
+// hallucinated reference and is dropped; `manual` facts are protected from UPDATE; an UPDATE whose
+// new text already exists as another fact is a no-op (it used to be a merge = a delete of the updated
+// id — the model abused it to "merge" unrelated facts about the same person); ADD texts are deduped
+// against known facts and within the batch and capped at `maxAdds`.
 export function parseMemoryOps(
   out: string,
   known: KnownFact[] = [],
@@ -80,28 +81,15 @@ export function parseMemoryOps(
   const refusalContains = tList(lang, "mem_refusal_contains");
   const byId = new Map<number, KnownFact>(known.map(k => [k.id, k]));
   const seen = new Set(known.map(k => normKey(k.text)));
-  const idByKey = new Map<string, number>(known.map(k => [normKey(k.text), k.id])); // for `keeps` on a merge
-  const ops: MemoryOps = { adds: [], updates: [], deletes: [], keeps: {} };
+  const ops: MemoryOps = { adds: [], updates: [] };
   const touched = new Set<number>(); // an id gets at most one op per pass (first wins)
 
   for (const rawLine of String(out ?? "").split("\n")) {
     const line = rawLine.trim();
     if (!line) continue;
 
-    let m: RegExpMatchArray | null;
-    if ((m = line.match(RE_DELETE))) {
-      const keep = m[2] !== undefined && byId.has(Number(m[2])) ? Number(m[2]) : undefined;
-      for (const idStr of m[1].match(/\d+/g) || []) {
-        const id = Number(idStr);
-        const k = byId.get(id);
-        if (!k || k.source === "manual" || touched.has(id)) continue;
-        touched.add(id);
-        ops.deletes.push(id);
-        if (keep !== undefined && keep !== id) ops.keeps[id] = keep;
-      }
-      continue;
-    }
-    if ((m = line.match(RE_UPDATE))) {
+    const m = line.match(RE_UPDATE);
+    if (m) {
       const id = Number(m[1]);
       const k = byId.get(id);
       if (!k || k.source === "manual" || touched.has(id)) continue;
@@ -110,15 +98,15 @@ export function parseMemoryOps(
       const key = normKey(text);
       touched.add(id);
       if (key === normKey(k.text)) continue;      // no-op: same text
-      if (seen.has(key)) { ops.deletes.push(id); const twin = idByKey.get(key); if (twin !== undefined && twin !== id) ops.keeps[id] = twin; continue; } // MERGE into the existing twin
+      if (seen.has(key)) continue;                // the text already exists as another fact → nothing to do
       // An UPDATE that shrinks a fact to less than half its length is compression, not a correction (the model
       // dropping dosages, names, details) — skip it; the original stays intact. A genuine rewording keeps the substance.
       if (text.length < k.text.length * MEM_UPDATE_MIN_RATIO) continue;
-      seen.add(key); idByKey.set(key, id);
+      seen.add(key);
       ops.updates.push({ id, text });
       continue;
     }
-    if (RE_OP_WORD.test(line)) continue; // e.g. `UPDATE 12 text` (no colon) or `DELETE all` — not a fact, drop it
+    if (RE_OP_WORD.test(line)) continue; // `DELETE 12`, `UPDATE 12 text` (no colon) — not a fact, drop it
     const addM = line.match(RE_ADD);
     const text = cleanFactLine(addM ? addM[1] : line, refusalStarts, refusalContains);
     if (!text) continue;
@@ -131,61 +119,6 @@ export function parseMemoryOps(
   return ops;
 }
 
-// Content stems of a fact, for the delete guard below: lower-cased words of ≥3 letters/digits (сыр, кот count) cut
-// to 4 chars — a crude stemmer that survives Russian inflection (сделала/сделать → сдел, банке/банка → банк) — minus
-// the short function words that would otherwise create spurious overlap (для, все, the, has …). Words capitalised in
-// the original text (names, brands, titles — Глеб, Killing Floor, «Сумерки») are DROPPED: two facts about the same
-// PERSON share the name by definition, and that must not count as sharing the fact.
-const STEM_STOP = new Set([
-  "для", "она", "они", "оно", "его", "ему", "нею", "как", "что", "все", "всё", "так", "уже", "нет", "или", "под", "над", "при", "про", "без",
-  "это", "эта", "эти", "тот", "том", "той", "чем", "кто", "где", "там", "тут", "вот", "был", "ещё", "еще", "раз", "лет", "год", "дня", "дней",
-  "the", "and", "has", "had", "not", "was", "are", "for", "but", "who", "his", "her", "she", "him", "its", "did", "can", "may", "all", "any", "out", "now", "one", "two", "too", "yet", "own", "per",
-]);
-export function factStems(text: string): Set<string> {
-  const out = new Set<string>();
-  for (const w of text.match(/[\p{L}\p{N}]+/gu) || []) {
-    if (w.length < 3 || /^\p{Lu}/u.test(w)) continue;
-    const lw = w.toLowerCase();
-    if (STEM_STOP.has(lw)) continue;
-    out.add(lw.slice(0, 4));
-  }
-  return out;
-}
-// Share of the deleted fact's stems that the kept fact also carries (0..1; 0 when the deleted fact has none).
-export function factOverlap(deleted: string, kept: string): number {
-  const a = factStems(deleted), b = factStems(kept);
-  if (!a.size) return 0;
-  let shared = 0;
-  for (const st of a) if (b.has(st)) shared++;
-  return shared / a.size;
-}
-
-// The consolidation guard on deletes. Policy: a DELETE is only ever the losing twin of a merge or a fact superseded
-// by a newer one — so it MUST name what stays (`-> keepId`, or the twin of a merge), and the kept fact — as it will
-// read after the pass — must overlap the deleted one in content (≥ MEM_DELETE_MIN_OVERLAP of its stems): the same
-// FACT, not merely the same person or topic. Live runs showed the model pairing «Глеб проектирует интерфейсы» with
-// «Глеб … графический дизайнер» or «Стас избегает незнакомых девушек» with «Стас водомут» as "duplicates" — topic
-// confused with identity — and losing a fact is irreversible, so such deletes are dropped and reported (`blocked`).
-// A keep that is itself deleted in the pass, unknown, or missing counts as no pair. Consolidation only: the
-// extraction pass may legitimately DELETE a fact the user retracted, with nothing to point at.
-export function guardConsolidationDeletes(ops: MemoryOps, known: KnownFact[]): { ops: MemoryOps; blocked: { id: number; keep?: number }[] } {
-  const text = new Map<number, string>(known.map(k => [k.id, k.text]));
-  for (const u of ops.updates) text.set(u.id, u.text);
-  const blocked: { id: number; keep?: number }[] = [];
-  const deletes: number[] = [];
-  const keeps: Record<number, number> = {};
-  for (const id of ops.deletes) {
-    const kid = ops.keeps[id];
-    const kept = kid !== undefined ? text.get(kid) : undefined;
-    if (kid === undefined || kept === undefined || ops.deletes.includes(kid) || factOverlap(text.get(id) ?? "", kept) < MEM_DELETE_MIN_OVERLAP) {
-      blocked.push(kid !== undefined ? { id, keep: kid } : { id });
-      continue;
-    }
-    deletes.push(id); keeps[id] = kid;
-  }
-  return { ops: { ...ops, deletes, keeps }, blocked };
-}
-
 // Back-compat wrapper: the old "lines → new facts" parser. Kept for callers/tests that only care about
 // additions; ops on ids are ignored here (no ids were shown).
 export function parseExtractedFacts(out: string, existing: string[] = [], lang: string = DEFAULT_LANG): string[] {
@@ -193,12 +126,10 @@ export function parseExtractedFacts(out: string, existing: string[] = [], lang: 
   return parseMemoryOps(out, known, lang).adds;
 }
 
-// Apply parsed operations to storage (D1 rows + Vectorize vectors). Deletes first, then updates, then
-// adds — so a merge that deletes an id never races its own update. Best-effort per op.
+// Apply parsed operations to storage (D1 rows + Vectorize vectors): updates, then adds. Best-effort per op.
 // Ops of one phase are independent (distinct ids), so each phase runs CONCURRENTLY in chunks of
 // MEM_APPLY_PARALLEL — a consolidation pass can emit dozens of ops, and applied one by one (D1 +
-// Vectorize + an embed per UPDATE) they alone could push the webhook past its limit. Phase order is
-// kept: deletes → updates → adds (a merge never races its own update).
+// Vectorize + an embed per UPDATE) they alone could push the webhook past its limit.
 async function eachConcurrently<T>(items: T[], fn: (x: T) => Promise<boolean>): Promise<number> {
   let n = 0;
   for (let i = 0; i < items.length; i += MEM_APPLY_PARALLEL) {
@@ -208,8 +139,7 @@ async function eachConcurrently<T>(items: T[], fn: (x: T) => Promise<boolean>): 
   return n;
 }
 export async function applyMemoryOps(ctx: Ctx, ops: MemoryOps): Promise<ApplyResult> {
-  const res: ApplyResult = { added: 0, updated: 0, deleted: 0 };
-  res.deleted = await eachConcurrently(ops.deletes, (id) => deleteMemory(ctx, id));
+  const res: ApplyResult = { added: 0, updated: 0 };
   res.updated = await eachConcurrently(ops.updates, (u) => updateMemory(ctx, u.id, u.text));
   res.added = await eachConcurrently(ops.adds, async (text) => !!(await addMemory(ctx, text, "auto")));
   return res;
@@ -263,8 +193,9 @@ function dedupAgainst(adds: string[], all: KnownFact[]): string[] {
   return adds.filter(a => !seen.has(normKey(a)));
 }
 
-// Explicit full pass over the chat's facts: merge duplicates, resolve contradictions (newest wins),
-// drop the obsolete. Works regardless of cfg.rag (an explicit user action, like /memory add).
+// Explicit full pass over the chat's facts: repair contradictions — a fact that changed («planning» →
+// «done», «works at» → «was fired») is UPDATEd to its current state. Nothing is ever deleted; duplicates
+// are left alone. Works regardless of cfg.rag (an explicit user action, like /memory add).
 // Returns the applied counts, or null when the LLM failed. `partial` = more facts than one pass covers.
 export interface ConsolidateResult extends ApplyResult {
   total: number;   // facts in the chat when the command started
@@ -277,11 +208,7 @@ export interface ConsolidateResult extends ApplyResult {
   dryRun: boolean;
 }
 export interface ConsolidateDiff {
-  /** `keep` = the fact that stays in place of the deleted one (as it will read after this pass), when the model named it */
-  deleted: { id: number; text: string; keep?: { id: number; text: string } }[];
   updated: { id: number; from: string; to: string }[];
-  /** deletes the model asked for that the guard refused (no pair / the pair is not the same fact) — nothing happened to them */
-  blocked: { id: number; text: string; keep?: { id: number; text: string } }[];
   more: number; // entries beyond the cap
 }
 
@@ -331,28 +258,27 @@ export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number; p
   const budgetMs = opts.budgetMs ?? MEM_CONSOLIDATE_TIME_BUDGET_MS;
   const parallel = Math.max(1, opts.parallel ?? MEM_CONSOLIDATE_PARALLEL);
   const dryRun = !!opts.dryRun;
-  const emptyDiff = (): ConsolidateDiff => ({ deleted: [], updated: [], blocked: [], more: 0 });
-  const diff: ConsolidateDiff = emptyDiff();
+  const diff: ConsolidateDiff = { updated: [], more: 0 };
   const all = toKnown(await listMemories(ctx.env, ctx.chatId));
   const total = all.length;
-  if (total < 2) return { added: 0, updated: 0, deleted: 0, total, checked: total, passes: 0, partial: false, diff: emptyDiff(), dryRun };
+  if (total < 2) return { added: 0, updated: 0, total, checked: total, passes: 0, partial: false, diff, dryRun };
 
   const cursor = await readConsolidateCursor(ctx.env, ctx.chatId);
   let start = cursor > 0 ? all.findIndex(k => k.id > cursor) : 0;
   if (start < 0) start = 0; // a stale cursor past the newest fact → start over from the oldest
 
   const t0 = Date.now();
-  let passes = 0, updated = 0, deleted = 0, lastRoundMs = 0, failed = false;
+  let passes = 0, updated = 0, lastRoundMs = 0, failed = false;
   // A pass cut by max_tokens (finish=length) ends in a partial line — drop it: applying a fragment as an
   // UPDATE would overwrite a fact with half a sentence. (A complete last line lost this way is just redone next time.)
   const passOver = async (slice: KnownFact[]): Promise<string> => {
     let truncated = false;
     const out = await runLLMWithHistory(
-    ctx.cfg,
-    buildMemoryConsolidationPrompt(ctx.cfg.lang, slice, tzStamp(Date.now(), ctx.cfg.timezone).slice(0, 10)),
-    [],
-    t(ctx.cfg.lang, "mem_consolidate_user_turn"),
-    ctx.msg,
+      ctx.cfg,
+      buildMemoryConsolidationPrompt(ctx.cfg.lang, slice, tzStamp(Date.now(), ctx.cfg.timezone).slice(0, 10)),
+      [],
+      t(ctx.cfg.lang, "mem_consolidate_user_turn"),
+      ctx.msg,
       { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel, maxTokens: MEM_CONSOLIDATE_MAX_TOKENS, reasoning: false,
         onMeta: (m) => { if (m.finishReason === "length") truncated = true; } }
     );
@@ -379,34 +305,23 @@ export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number; p
       const out = outs[w];
       if (out === undefined || isFallbackMessage(out)) { failed = true; continue; } // failed or not settled in time → redone next run
       // A consolidation pass rewrites what exists; it is not a place to invent new facts.
-      const { ops, blocked } = guardConsolidationDeletes(parseMemoryOps(out, windows[w], ctx.cfg.lang, 0), windows[w]);
-      // Record the diff (texts come from the window the model saw) — the reply shows WHAT changed, so a
-      // human reviews a short diff instead of the whole list. A dry run stops here: counts, no writes.
+      const ops = parseMemoryOps(out, windows[w], ctx.cfg.lang, 0);
+      // Record the diff (texts come from the window the model saw) — the reply shows WHAT changed (was ⟶ now),
+      // so a human reviews a short diff instead of the whole list. A dry run stops here: counts, no writes.
       const byId = new Map(windows[w].map(k => [k.id, k]));
-      const room = () => diff.deleted.length + diff.updated.length + diff.blocked.length < MEM_CONSOLIDATE_DIFF_MAX;
-      // The kept twin is shown as it will read AFTER the pass (an UPDATE of the same pass wins over the old text);
-      // a keep that is itself deleted in this pass is meaningless → omitted.
-      const newText = new Map(ops.updates.map(u => [u.id, u.text]));
-      const keepOf = (kid: number | undefined): { id: number; text: string } | undefined => {
-        if (kid === undefined) return undefined;
-        const text = newText.get(kid) ?? byId.get(kid)?.text;
-        return text ? { id: kid, text } : undefined;
-      };
-      for (const id of ops.deletes) { if (room()) diff.deleted.push({ id, text: byId.get(id)?.text ?? "", keep: keepOf(ops.keeps[id]) }); else diff.more++; }
-      for (const b of blocked) { if (room()) diff.blocked.push({ id: b.id, text: byId.get(b.id)?.text ?? "", keep: keepOf(b.keep) }); else diff.more++; }
-      for (const u of ops.updates) { if (room()) diff.updated.push({ id: u.id, from: byId.get(u.id)?.text ?? "", to: u.text }); else diff.more++; }
-      if (dryRun) { updated += ops.updates.length; deleted += ops.deletes.length; passes++; }
+      for (const u of ops.updates) { if (diff.updated.length < MEM_CONSOLIDATE_DIFF_MAX) diff.updated.push({ id: u.id, from: byId.get(u.id)?.text ?? "", to: u.text }); else diff.more++; }
+      if (dryRun) { updated += ops.updates.length; passes++; }
       else {
         const res = await applyMemoryOps(ctx, ops);
-        updated += res.updated; deleted += res.deleted; passes++;
+        updated += res.updated; passes++;
       }
       // The cursor must stay CONTIGUOUS: a window after a failed one is still applied (its ops are safe and
-      // already paid for) but does not advance \`start\` — it gets re-checked from the cursor next time.
+      // already paid for) but does not advance `start` — it gets re-checked from the cursor next time.
       if (!failed) start += windows[w].length;
     }
   }
   if (passes === 0) return null; // nothing achieved in this invocation → report the failure
   const partial = start < total;
   if (!dryRun) await writeConsolidateCursor(ctx.env, ctx.chatId, partial && start > 0 ? all[start - 1].id : 0); // start=0 → no contiguous progress → no cursor; a dry run never moves it
-  return { added: 0, updated, deleted, total, checked: start, passes, partial, diff, dryRun };
+  return { added: 0, updated, total, checked: start, passes, partial, diff, dryRun };
 }

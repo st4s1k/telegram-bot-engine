@@ -45,7 +45,7 @@ export function buildPhotoFromCachePrompt(desc: string, ctx: Ctx): string {
 
 // Fact-extraction prompt for long-term memory. NEUTRAL (no persona) — passed to
 // runLLMWithHistory as the system prompt directly (not via assemblePrompt). Language — from cfg.lang.
-// Known facts are shown as `[id] text` so the model can reference them in UPDATE/DELETE ops.
+// Known facts are shown as `[id] text` so the model can reference them in UPDATE ops (there is no DELETE).
 const knownFactLines = (known: { id: number; text: string }[]): string[] => known.map(k => `[${k.id}] ${k.text}`);
 
 export function buildMemoryExtractionPrompt(lang: string, known: { id: number; text: string }[] = []): string {
@@ -60,7 +60,7 @@ export function buildMemoryExtractionPrompt(lang: string, known: { id: number; t
 
 // Full consolidation pass over a chat's facts (/memory consolidate): no new messages, only the list.
 // `today` (YYYY-MM-DD in the chat's timezone) lets the model judge whether a plan's date has passed — without it every
-// dated plan looks "long past" and future arrangements get deleted.
+// dated plan looks "long past" and a future arrangement gets "corrected" into a done one.
 export function buildMemoryConsolidationPrompt(lang: string, known: { id: number; text: string }[], today: string = ""): string {
   return [t(lang, "mem_consolidate", today), ...knownFactLines(known)].join("\n");
 }

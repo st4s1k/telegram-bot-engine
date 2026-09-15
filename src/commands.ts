@@ -340,11 +340,11 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
       return t(lang, "mem_dedupe_ok", removed);
     }
 
-    // /memory consolidate — one LLM pass over the chat's facts: merge duplicates/paraphrases, resolve
-    // contradictions (newest wins), drop the obsolete. The maintenance tool for memory that has grown
-    // append-only for months. Works with rag off too (like /memory add). Manual facts are never touched.
-    // `/memory consolidate dry` (aliases in mem_sub_consolidate_dry) = a PREVIEW: the same LLM passes, the
-    // reply shows what WOULD be deleted/updated, nothing is written and the cursor stays put.
+    // /memory consolidate — LLM passes over the chat's facts that REPAIR CONTRADICTIONS: a fact that changed
+    // («planning» → «done», «works at» → «was fired») is UPDATEd to its current state. Nothing is ever deleted
+    // by an LLM pass (only a human does: `del`/`forget`/`dedupe`). Works with rag off too (like /memory add).
+    // Manual facts are never touched. `/memory consolidate dry` (aliases in mem_sub_consolidate_dry) = a PREVIEW:
+    // the same LLM passes, the reply shows what WOULD be updated, nothing is written and the cursor stays put.
     const cParts = raw.split(/\s+/);
     const cHead = (cParts[0] || "").toLowerCase();
     const cArg = (cParts[1] || "").toLowerCase();
@@ -353,15 +353,11 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
       const r = await consolidateMemories(ctx, { dryRun });
       if (!r) return t(lang, "mem_consolidate_fail");
       if (r.total < 2) return t(lang, "mem_consolidate_few", r.total);
-      if (!r.updated && !r.deleted && !r.partial && !r.diff.blocked.length) return t(lang, "mem_consolidate_clean", r.total);
-      const head = t(lang, r.dryRun ? "mem_consolidate_dry" : "mem_consolidate_done", r.updated, r.deleted, r.total, r.checked, r.passes, r.partial ? t(lang, "mem_consolidate_partial") : "");
-      // The diff: deleted facts (text, each with the fact that stays in its place when known) and updates
-      // (was ⟶ now) — a reviewable list instead of 250 rows.
+      if (!r.updated && !r.partial) return t(lang, "mem_consolidate_clean", r.total);
+      const head = t(lang, r.dryRun ? "mem_consolidate_dry" : "mem_consolidate_done", r.updated, r.total, r.checked, r.passes, r.partial ? t(lang, "mem_consolidate_partial") : "");
+      // The diff: every update as `was ⟶ now` — a reviewable list instead of 250 rows.
       const lines: string[] = [head];
-      if (r.diff.deleted.length) { lines.push("", t(lang, "mem_consolidate_diff_deleted")); for (const d of r.diff.deleted) { lines.push("— " + d.text); if (d.keep) lines.push(t(lang, "mem_consolidate_diff_keep", d.keep.text)); } }
       if (r.diff.updated.length) { lines.push("", t(lang, "mem_consolidate_diff_updated")); for (const u of r.diff.updated) lines.push("— " + u.from + " ⟶ " + u.to); }
-      // Deletes the guard refused: shown so the reviewer sees what the model WANTED to drop (and would have, without the guard).
-      if (r.diff.blocked.length) { lines.push("", t(lang, "mem_consolidate_diff_blocked")); for (const b of r.diff.blocked) { lines.push("— " + b.text); if (b.keep) lines.push(t(lang, "mem_consolidate_diff_blocked_keep", b.keep.text)); } }
       if (r.diff.more) lines.push(t(lang, "mem_consolidate_diff_more", r.diff.more));
       return lines.join("\n");
     }
