@@ -19,9 +19,12 @@ import { runMemoryCuration } from "./curation";
 import { getPersonaQuickReplies, getPersonaThrows } from "./persona/registry";
 import { handlePhotoMessage } from "./vision";
 import { recallMemories } from "./recall";
+import { startTrace, traceEvent, purgeTraces } from "./trace";
+import type { Trace } from "./trace";
+import { TRACE_DAYS } from "./constants";
 import type { BotConfig, Ctx, Env, TgMessage } from "./types";
 
-export async function handleTelegramMessage(msg: TgMessage, env: Env, isEdit: boolean = false): Promise<void> {
+export async function handleTelegramMessage(msg: TgMessage, env: Env, isEdit: boolean = false, trace?: Trace): Promise<void> {
   const globalCfg = getGlobalConfig(env);
   const chatData = await getChatData(msg.chat.id, env);
   // State read failed → we reply with defaults and do NOT write (see _loadFailed). This is a "silent"
@@ -30,6 +33,7 @@ export async function handleTelegramMessage(msg: TgMessage, env: Env, isEdit: bo
   const effectiveCfg = mergeConfig(globalCfg, chatData.config);
 
   const ctx = makeCtx(msg, env, effectiveCfg, chatData);
+  ctx._trace = trace || startTrace(); // the observability trace of this update (index.ts started it at the webhook)
 
   // Keep the chat name up to date (for /admin): the group title or the interlocutor's name.
   // Update only if it changed — so we don't needlessly mark the record _dirty.
@@ -43,6 +47,7 @@ export async function handleTelegramMessage(msg: TgMessage, env: Env, isEdit: bo
     // Edit: update the already-stored message in history and do NOT reply again.
     // (Telegram sends edited_message on an edit; it does not send deletions to bots.)
     if (isEdit) {
+      await traceEvent(ctx, "route", { kind: "edit" });
       await updateHistoryMessage(ctx, msg);
       return;
     }
@@ -52,6 +57,7 @@ export async function handleTelegramMessage(msg: TgMessage, env: Env, isEdit: bo
     // Commands take priority over the visual branch: if it's a command (including in a reply
     // to a photo/sticker, e.g. a content command from the pack), we handle it as a command in the normal flow.
     if (ctx.hasVisual && !isCommand(mode.type)) {
+      await traceEvent(ctx, "route", { kind: "photo", detail: { visual: ctx.visualKind } });
       await handlePhotoMessage(ctx);
       return;
     }
@@ -59,6 +65,7 @@ export async function handleTelegramMessage(msg: TgMessage, env: Env, isEdit: bo
     // /retry: re-run the user's LAST message (see handleRetry). Handled before the normal dispatch so the
     // re-run drives the full flow on the SAME ctx; the `/retry` call itself isn't logged (skipHistory).
     if (mode.type === "retry") {
+      await traceEvent(ctx, "route", { kind: "retry" });
       await handleRetry(ctx);
       return;
     }
@@ -84,14 +91,16 @@ export async function handleTelegramMessage(msg: TgMessage, env: Env, isEdit: bo
     }
 
     // If paused — react only to commands
-    if (ctx.chatData.paused && !isCommand(mode.type)) return;
+    if (ctx.chatData.paused && !isCommand(mode.type)) { await traceEvent(ctx, "route", { kind: "paused", outcome: "silent" }); return; }
 
     // 1) Quick replies → 2) Commands → 3) Regular chat
-    if (!ctx.chatData.paused && ctx.cfg.random && await tryQuickReply(ctx)) return;
+    if (!ctx.chatData.paused && ctx.cfg.random && await tryQuickReply(ctx)) { await traceEvent(ctx, "route", { kind: "quick_reply" }); return; }
+    if (isCommand(mode.type)) await traceEvent(ctx, "route", { kind: "command:" + mode.type });
     if (await tryCommand(mode, ctx)) return;
     // Unknown but addressed `/command` → a short hint (with the command list pointer), not an LLM turn.
     // After the pause gate, so a paused chat stays quiet; after quick-replies/commands, so a real match wins.
     if (unknownCmdAddressed) {
+      await traceEvent(ctx, "route", { kind: "unknown_command", detail: { cmd: unknownCmd } });
       await sendAndStore(ctx, t(ctx.cfg.lang, "cmd_unknown", "/" + unknownCmd), { skipHistory: true });
       return;
     }
@@ -186,7 +195,7 @@ export async function handleChatMessage(ctx: Ctx, opts: { force?: boolean } = {}
   // mention check and then the answer_prob roll — the exact «/retry did nothing» failure.
   // reason "addressed" (not "random") also pins kind to "default": a retry never turns into a random throw.
   const decision = opts.force ? { answer: true, reason: "addressed" } : shouldAnswer(ctx.textRaw, ctx.msg, ctx.cfg);
-  if (!decision.answer) return;
+  if (!decision.answer) { await traceEvent(ctx, "route", { kind: "chat", outcome: "silent", detail: { reason: decision.reason } }); return; }
 
   // A random throw — only if the bot itself decided to reply (not addressed) and it's not a reply
   const isReply = !!getReplyText(ctx.msg);
@@ -194,6 +203,7 @@ export async function handleChatMessage(ctx: Ctx, opts: { force?: boolean } = {}
     ? pickRandomRandomKind(ctx.cfg)
     : "default";
   const handler = RANDOM_HANDLERS[kind] || RANDOM_HANDLERS.default;
+  await traceEvent(ctx, "route", { kind: "chat:" + kind, outcome: "answer", detail: { reason: decision.reason, force: !!opts.force } });
 
   // Long-term memory (RAG): mix in relevant old messages only into the regular reply
   // (default) and only if enabled. Content throws from the pack don't use memory.
@@ -225,6 +235,14 @@ export async function handleChatMessage(ctx: Ctx, opts: { force?: boolean } = {}
 export async function runDailySummaries(env: Env, scheduledTimeMs: number): Promise<void> {
   const globalCfg = getGlobalConfig(env);
   if (tzParts(scheduledTimeMs, globalCfg.timezone).hour !== 8) return; // not 08:00 in the configured TZ — this fire isn't ours
+
+  // Observability journal retention: trace_events older than TRACE_DAYS go (the only bound on the journal).
+  try {
+    const gone = await purgeTraces(env, scheduledTimeMs - TRACE_DAYS * 86400_000);
+    if (gone) console.log(JSON.stringify({ trace: "purged", days: TRACE_DAYS, rows: gone }));
+  } catch (e: any) {
+    await reportError(env, "purgeTraces", e);
+  }
 
   // Retention sweep (deployment-wide RETENTION_DAYS): purge history + facts older than the window across
   // ALL chats — once a day, before the per-chat work. Disabled (kept forever) when RETENTION_DAYS is 0/unset.
@@ -258,11 +276,13 @@ export async function runDailySummaries(env: Env, scheduledTimeMs: number): Prom
         from: { id: eff.botId ?? 0, first_name: eff.botName, username: eff.botUsername },
       };
       const ctx = makeCtx(syntheticMsg, env, eff, chatData);
+      ctx._trace = startTrace("cron-" + tzParts(scheduledTimeMs, eff.timezone).day + "-" + chatId); // one trace per chat per cron day
 
       // (1) Fact curation BEFORE the summary (no-op if rag is off). We persist the curation
       // boundary IMMEDIATELY: if the summary step below fails, _memUptoId won't be lost and the next
       // cron won't re-extract the same delta. We reset _dirty so as not to flush the same thing twice.
       await runMemoryCuration(ctx);
+      await traceEvent(ctx, "cron", { kind: "curation", outcome: ctx.cfg.rag ? "ran" : "off" });
       if (ctx.chatData._dirty && !ctx.chatData._loadFailed) {
         await flushChatData(chatId, env, ctx.chatData);
         ctx.chatData._dirty = false;
@@ -271,6 +291,7 @@ export async function runDailySummaries(env: Env, scheduledTimeMs: number): Prom
       // (2) Daily summary (if enabled).
       if (ctx.cfg.daily_summary) {
         const { text, maxId, hadNew } = await runIncrementalSummary(ctx, ctx.chatData._dailyUptoId || 0);
+        await traceEvent(ctx, "cron", { kind: "summary", outcome: hadNew ? "sent" : "none", detail: { len: text ? String(text).length : 0 } });
         if (hadNew) {
           ctx.chatData._dailyUptoId = maxId;
           ctx.chatData._dirty = true;

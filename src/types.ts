@@ -2,6 +2,7 @@
  * Domain types for the worker. Described according to their actual use in the code.
  * Telegram types are intentionally partial — we take only the fields we actually read.
  */
+import type { Trace } from "./trace";
 
 /* ===================== Cloudflare env ===================== */
 
@@ -33,6 +34,7 @@ export interface Env {
   ADMIN_CHAT_IDS?: string;  // CSV list of chat_id for failure alerts (reportError critical); empty — log only
   ADMIN_USER_IDS?: string;  // CSV list of admin Telegram user ids (immutable account ids) — preferred over ADMIN_USERNAMES
   LLM_LOG?: string;
+  TRACE_LOG?: string; // observability journal in D1 (trace_events); default on, "false" turns it off
   ANSWER_PROB?: string;
   ENABLE_VISION?: string;
   ENABLE_REASONING?: string;
@@ -269,6 +271,10 @@ export interface Ctx {
   /** transient: the /summary handler just produced a FRESH digest (hadNew); tryCommand reads this after
    *  sending to record the sent message_id as _summaryMsgId (the "previous summary" pointer). */
   _trackSummaryMsg?: boolean;
+  /** transient: the observability trace this ctx belongs to (one per incoming update / cron job); created on first use */
+  _trace?: Trace;
+  /** transient: what the reply path recalled for this message — raw query, rewritten query, dated facts (attached to the LLM trace event) */
+  _recall?: { raw: string; query: string; facts: string[] };
 }
 
 export interface CommandMode {

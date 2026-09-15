@@ -6,6 +6,7 @@ import { TELEGRAM_MSG_LIMIT, GETFILE_TIMEOUT_MS } from "./constants";
 import { t, DEFAULT_LANG, LOCALES } from "./i18n";
 import { isFallbackMessage, buildAssistantItem } from "./utils";
 import { appendHistory } from "./storage";
+import { traceEvent, traceRaw } from "./trace";
 import { getAllCommands } from "./persona/registry";
 import type { Ctx, Env, TgSendResult } from "./types";
 
@@ -225,9 +226,12 @@ export async function sendAndStore(ctx: Ctx, content: string, { skipHistory = fa
     }
   }
   let lastSent: TgSendResult | null = null;
+  const sendT0 = Date.now();
   for (let i = 0; i < parts.length; i++) {
     lastSent = await sendTelegramMessage(ctx.cfg.telegramToken, ctx.chatId, parts[i], i === 0 ? ctx.replyTargetId : undefined);
   }
+  const stored = !skipHistory && !isFb && !!lastSent?.result?.message_id;
+  await traceEvent(ctx, "send", { outcome: lastSent?.result?.message_id ? "ok" : "error", elapsedMs: Date.now() - sendT0, detail: { chunks: parts.length, len: outText.length, message_id: lastSent?.result?.message_id ?? null, fallback: isFb, stored } });
   // We do NOT write to history: technical replies (status of /config, /info commands, etc.) and
   // fallback errors — otherwise the model later "picks them up" as its own utterance. Also skip when the
   // send FAILED (lastSent has no result.message_id: both MarkdownV2 and plain attempts errored / non-ok) —
@@ -247,6 +251,7 @@ export async function sendAndStore(ctx: Ctx, content: string, { skipHistory = fa
 export async function reportError(env: Env, where: string, err: any, opts: { critical?: boolean } = {}): Promise<void> {
   const msg = err?.message || String(err);
   console.error(`${where} failed`, { err: msg });
+  await traceRaw(env, "system", undefined, "error", { kind: where, outcome: opts.critical ? "critical" : "logged", detail: { msg: String(msg).slice(0, 2000) } });
   if (!opts.critical) return;
   // CSV list of chat_id (negative ones — groups — are valid). Empty/no valid ones → log only.
   const adminChats = String(env.ADMIN_CHAT_IDS || "")

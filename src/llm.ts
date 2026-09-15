@@ -6,6 +6,7 @@ import {
   GETFILE_TIMEOUT_MS, LLM_IDLE_TIMEOUT_MS, LLM_TIMEOUT_MS,
 } from "./constants";
 import { newReqId, formatWithMeta, getUserMeta } from "./utils";
+import { traceLLM } from "./trace";
 import { addSpend } from "./storage";
 import { getPersonaTexts } from "./persona/registry";
 import { t } from "./i18n";
@@ -150,8 +151,10 @@ export interface LLMMeta { finishReason?: string }
 export async function callOpenRouter(
   cfg: BotConfig,
   messages: LLMMessage[],
-  { tag = "req", extraLog = {}, ctx = null, modelOverride = "", maxTokens, reasoning, onMeta }: {
+  { tag = "req", extraLog = {}, ctx = null, modelOverride = "", maxTokens, reasoning, onMeta, kind: kindOpt }: {
     tag?: string; extraLog?: Record<string, unknown>; ctx?: Ctx | null; modelOverride?: string; maxTokens?: number; reasoning?: boolean; onMeta?: (m: LLMMeta) => void;
+    /** what this call is for, in the trace journal: reply | preview | rewrite | curation | summary | vision | <pack command> (default: reply) */
+    kind?: string;
   } = {},
 ): Promise<string> {
   const rid = newReqId();
@@ -182,6 +185,11 @@ export async function callOpenRouter(
 
   const startTs = Date.now();
   logLLM(cfg, tag, { rid, model, ...extraLog });
+  // The trace journal (trace.ts): one `llm` event per call at every exit below — prompt, last user message,
+  // response/error, finish, cost, timing. Best-effort, only when the caller passed a ctx (a chat to file it under).
+  const kind = kindOpt || (tag === "req" ? "reply" : tag);
+  const record = (outcome: string, x: { cost?: number; finish?: string; response?: string } = {}): Promise<void> =>
+    ctx ? traceLLM(ctx, { rid, kind, model, outcome, elapsedMs: Date.now() - startTs, cost: x.cost, finish: x.finish, messages, response: x.response ?? "" }) : Promise.resolve();
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (cfg.openrouterApiKey) headers.Authorization = "Bearer " + cfg.openrouterApiKey;
@@ -210,6 +218,7 @@ export async function callOpenRouter(
       const elapsed = Date.now() - startTs;
       logLLM(cfg, tag + "_err", { rid, status: res.status, elapsed, body: body.slice(0, 500) });
       llmStat({ rid, tag, model, elapsed, outcome: "http_" + res.status });
+      await record("http_" + res.status, { response: body.slice(0, 2000) });
       // The auxiliary callers (summary / fact curation / recall rewrite) pass reasoning:false purely for
       // speed, never as a requirement — so when the endpoint says reasoning can't be disabled, retry
       // ONCE with reasoning kept but excluded from the output (the same shape a normal reply uses).
@@ -217,12 +226,12 @@ export async function callOpenRouter(
       if (res.status === 400 && !useReasoning && REASONING_MANDATORY_RE.test(body)) {
         logLLM(cfg, tag + "_retry_reasoning", { rid, elapsed });
         llmStat({ rid, tag, model, elapsed, outcome: "retry_reasoning" });
-        return callOpenRouter(cfg, messages, { tag, extraLog, ctx, modelOverride, maxTokens, reasoning: true, onMeta });
+        return callOpenRouter(cfg, messages, { tag, extraLog, ctx, modelOverride, maxTokens, reasoning: true, onMeta, kind });
       }
       if (res.status === 402) return fb.fallbackNoCredits;
       return fb.fallbackError;
     }
-    if (!res.body) return fb.fallbackError;
+    if (!res.body) { await record("no_body"); return fb.fallbackError; }
 
     // We read the SSE stream: lines of the form `data: {json}`. We concatenate delta.content; usage —
     // in one of the final chunks. On every received piece we re-arm the idle timer.
@@ -263,10 +272,12 @@ export async function callOpenRouter(
     if (!content || !content.trim()) {
       console.warn("LLM empty stream", { rid, tag, elapsed });
       llmStat({ rid, tag, model, elapsed, outcome: "empty" });
+      await record("empty");
       return fb.fallbackError;
     }
     logLLM(cfg, tag + "_ok", { rid, elapsed, len: content.length, cost });
     llmStat({ rid, tag, model, elapsed, outcome: "ok", cost });
+    await record("ok", { cost, finish: finishReason, response: content });
     if (ctx && Number.isFinite(cost) && cost > 0) addSpend(ctx, cost);
     try { onMeta?.({ finishReason }); } catch { /* caller's problem, never ours */ }
     return content;
@@ -279,10 +290,12 @@ export async function callOpenRouter(
       const reason = ac.signal.reason === "idle" ? "idle" : "hard";
       console.warn("LLM timeout", { rid, tag, elapsed, model, reason });
       llmStat({ rid, tag, model, elapsed, outcome: "timeout_" + reason });
+      await record("timeout_" + reason);
       return fb.fallbackError;
     }
     console.error("LLM fetch error:", { rid, tag, elapsed, msg: e?.message || e });
     llmStat({ rid, tag, model, elapsed, outcome: "error" });
+    await record("error", { response: String(e?.message || e) });
     return fb.fallbackError;
   } finally {
     if (idleTimer) clearTimeout(idleTimer);
@@ -296,11 +309,11 @@ export async function runLLMWithHistory(
   history: HistoryItem[],
   userContent: string,
   msg: TgMessage,
-  { forceAppendUser = false, ctx = null, modelOverride = "", maxTokens, reasoning, onMeta }: { forceAppendUser?: boolean; ctx?: Ctx | null; modelOverride?: string; maxTokens?: number; reasoning?: boolean; onMeta?: (m: LLMMeta) => void } = {},
+  { forceAppendUser = false, ctx = null, modelOverride = "", maxTokens, reasoning, onMeta, kind }: { forceAppendUser?: boolean; ctx?: Ctx | null; modelOverride?: string; maxTokens?: number; reasoning?: boolean; onMeta?: (m: LLMMeta) => void; kind?: string } = {},
 ): Promise<string> {
   const messages = toLLMMessages(systemPrompt, history, userContent, msg, { forceAppendUser, tz: cfg.timezone });
   // modelOverride empty → callOpenRouter takes cfg.openrouterModel (normal behavior).
-  return callOpenRouter(cfg, messages, { tag: "req", extraLog: { count: messages.length }, ctx, modelOverride, maxTokens, reasoning, onMeta });
+  return callOpenRouter(cfg, messages, { tag: "req", extraLog: { count: messages.length }, ctx, modelOverride, maxTokens, reasoning, onMeta, kind });
 }
 
 export function toLLMMessages(

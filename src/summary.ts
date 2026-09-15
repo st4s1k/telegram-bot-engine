@@ -34,7 +34,7 @@ export async function runIncrementalSummary(
     ctx.msg,
     // A separate model for the summary (if set) — usually a fast one. Empty → the main model.
     // Auxiliary call: tight response cap + reasoning off (a digest needs neither 4000 tokens nor chain-of-thought).
-    { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel, maxTokens: SUMMARY_MAX_TOKENS, reasoning: false }
+    { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel, maxTokens: SUMMARY_MAX_TOKENS, reasoning: false, kind: "summary" }
   );
 
   if (isFallbackMessage(summary)) return { text: summary, maxId: sinceId, hadNew: false };

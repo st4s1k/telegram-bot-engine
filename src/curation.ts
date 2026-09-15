@@ -175,7 +175,7 @@ export async function runMemoryCuration(ctx: Ctx): Promise<void> {
       t(ctx.cfg.lang, "mem_extract_user_turn"),
       ctx.msg,
       // Auxiliary call: tight response cap + reasoning off (a handful of short ops; no chain-of-thought needed).
-      { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel, maxTokens: MEM_MAX_TOKENS, reasoning: false }
+      { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel, maxTokens: MEM_MAX_TOKENS, reasoning: false, kind: "curation" }
     );
     if (isFallbackMessage(out)) return; // LLM error/timeout → don't advance the boundary (retried next time)
     // Ops may reference only the shown ids; ADD dedup runs against ALL known facts.

@@ -40,7 +40,14 @@ export const RAG_REWRITE_HISTORY = 6;      // recent messages shown to the rewri
 export const RAG_REWRITE_MAX_TOKENS = 100; // one line of query
 export const RAG_REWRITE_MAX_CHARS = 300;
 export const RAG_REWRITE_TIMEOUT_MS = 6_000; // past this the raw query is used (the reply must not wait for a slow rewrite)
-export const RAG_REINDEX_BATCH = 50;       // /memory reindex: facts embedded + upserted per batch (bge-m3 takes up to 100 strings per call)
+export const RAG_REINDEX_BATCH = 50;
+// Observability (trace.ts): every stage of every request is a row in trace_events. Purged by the daily cron after
+// TRACE_DAYS; the detail JSON of an event (an LLM call carries the prompt, the last user message and the response) is capped.
+export const TRACE_DAYS = 7;
+export const TRACE_DETAIL_CAP = 16_000;
+export const TRACE_SYSTEM_CAP = 8_000;
+export const TRACE_TEXT_CAP = 2_000;
+export const TRACE_RESPONSE_CAP = 4_000;       // /memory reindex: facts embedded + upserted per batch (bge-m3 takes up to 100 strings per call)
 // Curating facts on the bot's reply:
 export const MEM_CURATION_MIN_NEW = 2;     // don't run extraction while there are fewer new messages
 export const MEM_MAX_FACTS_PER_RUN = 5;    // maximum facts per single extraction pass

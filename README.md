@@ -24,6 +24,7 @@ neutral. Engine code, comments and UI strings are in **English**; UI strings are
 - **Summaries:** an incremental `/summary` "what's new" digest + an optional daily summary via cron.
 - **Vision:** describes sent photos/stickers, with a per-image description cache.
 - **Per-chat config** via `/config`, memory control via `/memory`.
+- **Observability:** every request is traced stage by stage into D1 (webhook → route → recall → LLM call with prompt/response → send); `/admin trace` / `/admin event` read it back, the daily cron purges it after a week.
 - **Persona system:** personality (voice, fun commands, quick replies, random throws, presets) is a
   swappable pack layered over a persona-free core (see [Persona pack](#persona-pack)).
 - **Localization:** UI strings are externalized to locale files; language is per-chat (`/config lang`).
@@ -193,6 +194,7 @@ Typed ES-modules, layered bottom-up (each imports only from lower layers; no cyc
 | `prompts.ts` | system-prompt assembly (engine builders: default/reply/vision) |
 | `rag.ts` | Vectorize/Workers AI: embed/upsert/query/delete |
 | `recall.ts` | hybrid recall: query rewrite → vector + lexical (RRF) → dated facts |
+| `trace.ts` | observability: the per-request trace journal in D1 (`trace_events`) |
 | `persona/registry.ts` | persona contract + active-pack singleton; `persona/active.ts`, `persona/default.ts` |
 | `storage.ts` | chat state (D1 row) + write-through history + `memories` |
 | `telegram.ts` | MarkdownV2 converter + Telegram I/O + `reportError` |

@@ -11,6 +11,7 @@
 import "./persona/active";
 import { handleTelegramMessage, runDailySummaries } from "./flow";
 import { reportError, maybeSyncBotCommands } from "./telegram";
+import { startTrace, traceRaw } from "./trace";
 import type { Env, TgUpdate } from "./types";
 
 // Once-per-ISOLATE memo for the menu self-sync below. A deploy spins up fresh isolates (flag = false), so
@@ -45,13 +46,20 @@ export default {
       // Let through only text / photos / stickers (other types are ignored).
       if (!msg || (!msg.text && !msg.photo && !msg.sticker)) return new Response("ok");
 
+      // Observability: one trace per update (`u<update_id>`); the first event is the update itself.
+      const trace = startTrace(update?.update_id !== undefined ? "u" + update.update_id : undefined);
+      await traceRaw(env, msg.chat.id, trace, "webhook", {
+        kind: msg.photo ? "photo" : msg.sticker ? "sticker" : "text",
+        detail: { update_id: update?.update_id, message_id: msg.message_id, from: msg.from?.username || msg.from?.id, chat_type: msg.chat.type, edit: isEdit, len: (msg.text || msg.caption || "").length },
+      });
+
       // Protection against re-processing: on a slow response Telegram resends the same update
       // again. Keyed by update_id we set a flag in KV; if it already exists — it's a duplicate, stay silent.
       const updateId = update?.update_id;
       if (updateId !== undefined && env.KV) {
         const dKey = "dedup:" + updateId;
         try {
-          if (await env.KV.get(dKey)) return new Response("ok"); // already processed
+          if (await env.KV.get(dKey)) { await traceRaw(env, msg.chat.id, trace, "dedup", { outcome: "skipped" }); return new Response("ok"); } // already processed
           // TTL of 5 minutes: Telegram doesn't retry longer than that, and there's no point hoarding flags.
           await env.KV.put(dKey, "1", { expirationTtl: 300 });
         } catch (e: any) {
@@ -66,7 +74,7 @@ export default {
       // webhook response ~60s — we fit within that as long as the LLM timeout (LLM_TIMEOUT_MS) is smaller.
       // We swallow errors so as to always return 200 (otherwise Telegram will send a duplicate).
       try {
-        await handleTelegramMessage(msg, env, isEdit);
+        await handleTelegramMessage(msg, env, isEdit, trace);
       } catch (e: any) {
         await reportError(env, "handleTelegramMessage", e, { critical: true });
       }
@@ -103,6 +111,7 @@ export * from "./utils";
 export * from "./prompts";
 export * from "./rag";
 export * from "./recall";
+export * from "./trace";
 export * from "./storage";
 export * from "./telegram";
 export * from "./llm";

@@ -5,7 +5,7 @@
 import { MEM_MAX_FACT_CHARS } from "./constants";
 import { t, tList, LOCALES } from "./i18n";
 import {
-  makeCtx, parseCommandAndArg, historyChars, tzParts, stripBotAddressing,
+  makeCtx, parseCommandAndArg, historyChars, tzParts, tzStamp, stripBotAddressing,
 } from "./utils";
 import {
   getChatData, flushChatData, saveChatConfig, setPaused, setRole,
@@ -15,6 +15,8 @@ import { ragReindexMemories } from "./rag";
 import { CONFIG_SCHEMA, CONFIG_PRESETS, getGlobalConfig, mergeConfig, buildHelp, buildConfigHelp, buildConfigGroupHelp, findConfigGroup, buildInfoStatus, setConfigParam } from "./config";
 import { fetchModelPrice, fetchOpenRouterUsage, runLLMWithHistory } from "./llm";
 import { recallMemories, rewriteRecallQuery, ragRetrieveMemories } from "./recall";
+import { traceEvent, listTraces, getTrace, getTraceEvent, traceLLMStats, traceStageStats } from "./trace";
+import type { TraceEventRow } from "./trace";
 import { buildDefaultPrompt } from "./prompts";
 import { sendTyping, sendAndStore, syncBotCommands } from "./telegram";
 import { runIncrementalSummary } from "./summary";
@@ -190,6 +192,55 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
         t(lang, "adm_chat_model", cfg.model || t(lang, "adm_model_default")) + (cfg.vision_model ? ` · 👁 \`${cfg.vision_model}\`` : ""),
         cfgKeys.length ? t(lang, "adm_chat_settings", cfgKeys.map((k) => `\`${k}\``).join(", ")) : t(lang, "adm_chat_settings_default"),
       ].join("\n");
+    }
+
+    // /admin trace                — 24 h metrics (LLM per kind + stage counts)
+    // /admin trace <chatId> [n]   — the newest n traces of a chat, one line each (stages in order)
+    // /admin trace <traceId>      — one trace in full: every event with its offset, outcome and a detail summary
+    if (sub === "trace") {
+      const parts = subArg.split(/\s+/).filter(Boolean);
+      const tz = ctx.cfg.timezone;
+      if (!parts[0]) {
+        const since = Date.now() - 86_400_000;
+        const [llm, stages] = await Promise.all([traceLLMStats(ctx.env, since), traceStageStats(ctx.env, since)]);
+        if (!llm.length && !stages.length) return t(lang, "adm_trace_stats_none");
+        const lines = [t(lang, "adm_trace_stats_header")];
+        for (const r of llm) lines.push(t(lang, "adm_trace_stats_llm", r.kind, r.n, r.n - r.ok, Math.round(r.avg_ms), Math.round(r.max_ms), r.cost.toFixed(4)));
+        for (const r of stages) lines.push(t(lang, "adm_trace_stats_stage", r.stage, r.kind ? ":" + r.kind : "", r.n));
+        return lines.join("\n");
+      }
+      if (/^-?\d+$/.test(parts[0])) {
+        const n = Math.min(30, Math.max(1, parseInt(parts[1] || "10", 10) || 10));
+        const traces = await listTraces(ctx.env, parts[0], n);
+        if (!traces.length) return t(lang, "adm_trace_none", parts[0]);
+        const lines = [t(lang, "adm_trace_list_header", parts[0], traces.length)];
+        for (const tr of traces) lines.push("`" + tr.trace + "` " + tzStamp(tr.events[0].ts, tz).slice(5) + "\n   " + tr.events.map(traceEventBrief).join(" → "));
+        lines.push(t(lang, "adm_trace_hint"));
+        return lines.join("\n");
+      }
+      const events = await getTrace(ctx.env, parts[0]);
+      if (!events.length) return t(lang, "adm_trace_notfound", parts[0]);
+      const lines = [t(lang, "adm_trace_header", parts[0], events[0].chat_id, tzStamp(events[0].ts, tz))];
+      for (const e of events) lines.push(`#${e.id} +${e.ms}ms ${traceEventBrief(e)}` + (e.detail && e.detail !== "{}" ? " — " + e.detail.slice(0, 160) : ""));
+      lines.push(t(lang, "adm_event_hint"));
+      return lines.join("\n");
+    }
+
+    // /admin event <id> — one event in full (an LLM event: system prompt, last user message, memory block, response).
+    if (sub === "event") {
+      if (!/^\d+$/.test(subArg)) return t(lang, "adm_event_usage");
+      const e = await getTraceEvent(ctx.env, Number(subArg));
+      if (!e) return t(lang, "adm_event_notfound", subArg);
+      const d = parseJson<Record<string, any>>(e.detail, {});
+      const lines = [t(lang, "adm_event_header", e.id, e.trace, traceEventBrief(e), e.ms, e.cost != null ? " · $" + e.cost.toFixed(4) : "")];
+      if (e.stage === "llm") {
+        lines.push(t(lang, "adm_event_llm_meta", d.model ?? "", d.finish ?? "—", d.msg_count ?? 0, d.prompt_chars ?? 0));
+        if (d.recall) lines.push(t(lang, "adm_event_recall", d.recall.raw === d.recall.query ? d.recall.query : d.recall.raw + " ⟶ " + d.recall.query, (d.recall.facts || []).length), ...(d.recall.facts || []).map((f: string) => "— " + f));
+        lines.push(t(lang, "adm_event_user", d.user_text ?? ""), t(lang, "adm_event_response", d.response ?? ""), t(lang, "adm_event_system", d.system ?? ""));
+      } else {
+        lines.push(JSON.stringify(d, null, 1));
+      }
+      return lines.join("\n");
     }
 
     return t(lang, "adm_unknown_sub", sub);
@@ -578,6 +629,11 @@ setEngineCommands(ENGINE_COMMAND_PLUGINS);
 
 // COMMANDS/TECH/LLM are derived from a SINGLE list (core + persona). Adding a command = one object
 // in ENGINE_COMMAND_PLUGINS (core) or in the pack — names/flags are no longer duplicated anywhere else.
+// One trace event on one line: `stage:kind outcome 1.2s` (the list views).
+function traceEventBrief(e: TraceEventRow): string {
+  return e.stage + (e.kind ? ":" + e.kind : "") + (e.outcome ? " " + e.outcome : "") + (e.elapsed_ms != null ? " " + (e.elapsed_ms / 1000).toFixed(1) + "s" : "");
+}
+
 /* ---------- admin: acting inside ANOTHER chat ---------- */
 
 // A temporary ctx on top of another chat's data: the TARGET chat's effective config (not the admin's — otherwise
@@ -591,7 +647,9 @@ async function adminTargetCtx(ctx: Ctx, targetId: string, text: string): Promise
     text,
   };
   const targetCfg = mergeConfig(getGlobalConfig(ctx.env), targetData.config);
-  return makeCtx(targetMsg, ctx.env, targetCfg, targetData);
+  const tctx = makeCtx(targetMsg, ctx.env, targetCfg, targetData);
+  tctx._trace = ctx._trace; // the admin's request keeps one trace across both chats
+  return tctx;
 }
 
 // `/admin chat <id> /<command>`: run ANY command in another chat; the reply goes to the
@@ -620,7 +678,7 @@ async function adminPreviewInChat(ctx: Ctx, targetId: string, text: string): Pro
   targetCtx._preview = true;
   const q = stripBotAddressing(text, targetCtx.cfg);
   const memories = q.length >= 4 ? await recallMemories(targetCtx, q) : [];
-  const out = await runLLMWithHistory(targetCtx.cfg, buildDefaultPrompt(targetCtx, memories), targetCtx.chatData.history, text, targetCtx.msg, { ctx: targetCtx });
+  const out = await runLLMWithHistory(targetCtx.cfg, buildDefaultPrompt(targetCtx, memories), targetCtx.chatData.history, text, targetCtx.msg, { ctx: targetCtx, kind: "preview" });
   return t(lang, "adm_msg_result", targetId, out);
 }
 
@@ -647,7 +705,9 @@ export function isCommand(t: string): boolean {
 export async function tryCommand(mode: CommandMode, ctx: Ctx): Promise<boolean> {
   if (!isCommand(mode.type)) return false;
   if (LLM_COMMANDS.has(mode.type)) await sendTyping(ctx);
+  const cmdT0 = Date.now();
   const out = await COMMANDS[mode.type](ctx, mode);
+  await traceEvent(ctx, "command", { kind: mode.type, outcome: out != null && String(out).trim() ? "reply" : "silent", elapsedMs: Date.now() - cmdT0, detail: { argLen: (mode.argText || "").length, replyLen: out ? String(out).length : 0 } });
   // The handler may return null/empty (e.g. /admin for a non-admin) — then we stay silent.
   if (out != null && String(out).trim()) {
     const res = await sendAndStore(ctx, out, { skipHistory: TECH_COMMANDS.has(mode.type) });

@@ -26,6 +26,7 @@ import { ragQueryMemories, withTimeout } from "./rag";
 import { runLLMWithHistory } from "./llm";
 import { isFallbackMessage, tzStamp } from "./utils";
 import { t } from "./i18n";
+import { traceEvent } from "./trace";
 import type { Ctx, Memory } from "./types";
 
 /* ---------- lexical side ---------- */
@@ -79,7 +80,9 @@ export function lexicalRank(query: string, facts: Pick<Memory, "id" | "text" | "
 // Under cfg.rag. Vector candidates (score ≥ rag_min_score) and lexical candidates are fused by RRF; the
 // text and date come from the D1 row (the vector's metadata text is the fallback for a vector with no row).
 // Best-effort → [] on any error.
-export async function ragRetrieveMemories(ctx: Ctx, queryText: string): Promise<string[]> {
+// `dbg` (optional) receives the candidate lists for the trace journal: vector hits with scores, lexical hits, the fused order.
+export interface RecallDebug { vector?: { id: number; score: number }[]; lexical?: number[]; fused?: number[] }
+export async function ragRetrieveMemories(ctx: Ctx, queryText: string, dbg?: RecallDebug): Promise<string[]> {
   if (!ctx.cfg.rag) return [];
   const q = String(queryText ?? "").trim();
   if (!q) return [];
@@ -103,6 +106,7 @@ export async function ragRetrieveMemories(ctx: Ctx, queryText: string): Promise<
     vec.forEach((m, i) => add(m.memId, i, m.text));
     lex.forEach((id, i) => add(id, i, byId.get(id)?.text ?? ""));
     const ranked = [...fused.entries()].sort((a, b) => b[1].score - a[1].score).slice(0, topK);
+    if (dbg) { dbg.vector = vec.map(m => ({ id: m.memId, score: Math.round(m.score * 1000) / 1000 })); dbg.lexical = lex; dbg.fused = ranked.map(([id]) => id); }
     const out: string[] = [];
     for (const [id, r] of ranked) {
       const row = byId.get(id);
@@ -137,7 +141,7 @@ export async function rewriteRecallQuery(ctx: Ctx, raw: string): Promise<string>
         prior.slice(-RAG_REWRITE_HISTORY),
         q,
         ctx.msg,
-        { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel, maxTokens: RAG_REWRITE_MAX_TOKENS, reasoning: false },
+        { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel, maxTokens: RAG_REWRITE_MAX_TOKENS, reasoning: false, kind: "rewrite" },
       ),
       RAG_REWRITE_TIMEOUT_MS,
     );
@@ -154,6 +158,13 @@ export async function rewriteRecallQuery(ctx: Ctx, raw: string): Promise<string>
 // The reply-path entry point: rewrite → hybrid recall. `raw` is the message with the bot addressing stripped.
 export async function recallMemories(ctx: Ctx, raw: string): Promise<string[]> {
   if (!ctx.cfg.rag) return [];
+  const t0 = Date.now();
   const query = await rewriteRecallQuery(ctx, raw);
-  return ragRetrieveMemories(ctx, query);
+  const rewriteMs = Date.now() - t0;
+  const dbg: RecallDebug = {};
+  const facts = await ragRetrieveMemories(ctx, query, dbg);
+  // Left on the ctx for the reply's LLM trace event (what the model was given) and for /memory recall.
+  ctx._recall = { raw, query, facts };
+  await traceEvent(ctx, "recall", { outcome: facts.length ? "hit" : "miss", elapsedMs: Date.now() - t0, detail: { raw, query, rewriteMs, ...dbg, facts } });
+  return facts;
 }
