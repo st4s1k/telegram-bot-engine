@@ -28,6 +28,8 @@ export interface MemoryOps {
   adds: string[];
   updates: { id: number; text: string }[];
   deletes: number[];
+  /** deleted id → the id of the fact that stays in its place (`DELETE 3 -> 2`, or the twin an UPDATE merged into) */
+  keeps: Record<number, number>;
 }
 
 export interface ApplyResult { added: number; updated: number; deleted: number }
@@ -38,7 +40,8 @@ export interface KnownFact { id: number; text: string; source: string }
 const RE_ADD    = /^add\s*:\s*(.*)$/i;
 // The model may echo ids the way it saw them — `[182]` — or as `#182`; DELETE may list several ids.
 const RE_UPDATE = /^update\s+#?\[?\s*(\d+)\s*\]?\s*:\s*(.*)$/i;
-const RE_DELETE = /^delete\s+([#\[\]\d,\s]+)$/i; // ids extracted with /\d+/g
+// `DELETE 3 -> 2` names the fact that stays (the kept twin / the newer state) — shown next to the deletion in the diff.
+const RE_DELETE = /^delete\s+([#\[\]\d,\s]+?)\s*(?:(?:->|=>|→|⇒)\s*#?\[?\s*(\d+)\s*\]?)?\s*$/i; // ids extracted with /\d+/g
 const RE_OP_WORD = /^(?:delete|update)\b/i;         // a protocol line that failed to parse must never become an ADD
 
 // Normalize one candidate fact line: strip a real list marker, drop headings/refusals, cap length.
@@ -77,7 +80,8 @@ export function parseMemoryOps(
   const refusalContains = tList(lang, "mem_refusal_contains");
   const byId = new Map<number, KnownFact>(known.map(k => [k.id, k]));
   const seen = new Set(known.map(k => normKey(k.text)));
-  const ops: MemoryOps = { adds: [], updates: [], deletes: [] };
+  const idByKey = new Map<string, number>(known.map(k => [normKey(k.text), k.id])); // for `keeps` on a merge
+  const ops: MemoryOps = { adds: [], updates: [], deletes: [], keeps: {} };
   const touched = new Set<number>(); // an id gets at most one op per pass (first wins)
 
   for (const rawLine of String(out ?? "").split("\n")) {
@@ -86,12 +90,14 @@ export function parseMemoryOps(
 
     let m: RegExpMatchArray | null;
     if ((m = line.match(RE_DELETE))) {
+      const keep = m[2] !== undefined && byId.has(Number(m[2])) ? Number(m[2]) : undefined;
       for (const idStr of m[1].match(/\d+/g) || []) {
         const id = Number(idStr);
         const k = byId.get(id);
         if (!k || k.source === "manual" || touched.has(id)) continue;
         touched.add(id);
         ops.deletes.push(id);
+        if (keep !== undefined && keep !== id) ops.keeps[id] = keep;
       }
       continue;
     }
@@ -104,11 +110,11 @@ export function parseMemoryOps(
       const key = normKey(text);
       touched.add(id);
       if (key === normKey(k.text)) continue;      // no-op: same text
-      if (seen.has(key)) { ops.deletes.push(id); continue; } // MERGE into the existing twin
+      if (seen.has(key)) { ops.deletes.push(id); const twin = idByKey.get(key); if (twin !== undefined && twin !== id) ops.keeps[id] = twin; continue; } // MERGE into the existing twin
       // An UPDATE that shrinks a fact to less than half its length is compression, not a correction (the model
       // dropping dosages, names, details) — skip it; the original stays intact. A genuine rewording keeps the substance.
       if (text.length < k.text.length * MEM_UPDATE_MIN_RATIO) continue;
-      seen.add(key);
+      seen.add(key); idByKey.set(key, id);
       ops.updates.push({ id, text });
       continue;
     }
@@ -216,7 +222,8 @@ export interface ConsolidateResult extends ApplyResult {
   dryRun: boolean;
 }
 export interface ConsolidateDiff {
-  deleted: { id: number; text: string }[];
+  /** `keep` = the fact that stays in place of the deleted one (as it will read after this pass), when the model named it */
+  deleted: { id: number; text: string; keep?: { id: number; text: string } }[];
   updated: { id: number; from: string; to: string }[];
   more: number; // entries beyond the cap
 }
@@ -320,7 +327,16 @@ export async function consolidateMemories(ctx: Ctx, opts: { budgetMs?: number; p
       // human reviews a short diff instead of the whole list. A dry run stops here: counts, no writes.
       const byId = new Map(windows[w].map(k => [k.id, k]));
       const room = () => diff.deleted.length + diff.updated.length < MEM_CONSOLIDATE_DIFF_MAX;
-      for (const id of ops.deletes) { if (room()) diff.deleted.push({ id, text: byId.get(id)?.text ?? "" }); else diff.more++; }
+      // The kept twin is shown as it will read AFTER the pass (an UPDATE of the same pass wins over the old text);
+      // a keep that is itself deleted in this pass is meaningless → omitted.
+      const newText = new Map(ops.updates.map(u => [u.id, u.text]));
+      const keepOf = (id: number): { id: number; text: string } | undefined => {
+        const kid = ops.keeps[id];
+        if (kid === undefined || ops.deletes.includes(kid)) return undefined;
+        const text = newText.get(kid) ?? byId.get(kid)?.text;
+        return text ? { id: kid, text } : undefined;
+      };
+      for (const id of ops.deletes) { if (room()) diff.deleted.push({ id, text: byId.get(id)?.text ?? "", keep: keepOf(id) }); else diff.more++; }
       for (const u of ops.updates) { if (room()) diff.updated.push({ id: u.id, from: byId.get(u.id)?.text ?? "", to: u.text }); else diff.more++; }
       if (dryRun) { updated += ops.updates.length; deleted += ops.deletes.length; passes++; }
       else {

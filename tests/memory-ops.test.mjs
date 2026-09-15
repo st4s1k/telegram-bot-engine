@@ -88,7 +88,7 @@ describe("parseMemoryOps · protocol", () => {
 
   test("NONE (the explicit nothing-to-do sentinel) yields no ops and is not a fact", () => {
     const ops = parseMemoryOps("NONE", [K(1, "a")]);
-    assert.deepEqual(ops, { adds: [], updates: [], deletes: [] });
+    assert.deepEqual(ops, { adds: [], updates: [], deletes: [], keeps: {} });
     assert.deepEqual(parseMemoryOps("none.", []).adds, []);
   });
 
@@ -580,5 +580,60 @@ describe("/memory consolidate · today's date is in the consolidation prompt", (
     await runMemory(ctx, "/memory consolidate");
     const sys = FETCH.chatBody().messages[0].content;
     assert.match(sys, /Today is \d{4}-\d{2}-\d{2}\./);
+  });
+});
+
+describe("parseMemoryOps · keeps · the fact that stays in place of a deleted one", () => {
+  test("DELETE <id> -> <keepId> (bare, [id], #id, → / => arrows, several ids) records the kept id", () => {
+    const known = [K(1, "a"), K(2, "b"), K(3, "c"), K(4, "d"), K(5, "e")];
+    const ops = parseMemoryOps("DELETE [3] -> [2]\nDELETE #4 → 1\nDELETE 5 => #1", known, "en", 0);
+    assert.deepEqual(ops.deletes, [3, 4, 5]);
+    assert.deepEqual(ops.keeps, { 3: 2, 4: 1, 5: 1 });
+    const multi = parseMemoryOps("DELETE 2, 3 -> 1", known, "en", 0);
+    assert.deepEqual(multi.deletes, [2, 3]);
+    assert.deepEqual(multi.keeps, { 2: 1, 3: 1 });
+  });
+  test("an unknown or self keep id is ignored (the delete still applies); a plain DELETE has no keep", () => {
+    const known = [K(1, "a"), K(2, "b"), K(3, "c")];
+    const ops = parseMemoryOps("DELETE 1 -> 999\nDELETE 2 -> 2\nDELETE 3", known, "en", 0);
+    assert.deepEqual(ops.deletes, [1, 2, 3]);
+    assert.deepEqual(ops.keeps, {});
+  });
+  test("a merge (UPDATE whose text equals another fact) keeps the twin — a known one or one UPDATEd earlier in the batch", () => {
+    const known = [K(1, "Liza loves cheese"), K(2, "Liza adores cheese"), K(3, "Liza likes cheese"), K(4, "x")];
+    const ops = parseMemoryOps("UPDATE 2: Liza loves cheese\nUPDATE 4: Liza loves cheese and wine\nUPDATE 3: Liza loves cheese and wine", known, "en", 0);
+    assert.deepEqual(ops.deletes, [2, 3]);
+    assert.deepEqual(ops.keeps, { 2: 1, 3: 4 });
+  });
+});
+
+describe("/memory consolidate · diff shows the kept fact next to each deletion", () => {
+  test("dry run: `↳ kept:` line under the deleted text, carrying the kept fact AS IT WILL READ after the pass", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 96, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
+    const a = await addMemory(ctx, "Vasya drives a taxi", "auto");
+    const b = await addMemory(ctx, "Vasya is a taxi driver", "auto");
+    const c = await addMemory(ctx, "Vasya has a cat", "auto");
+    const d = await addMemory(ctx, "Vasya owns a cat", "auto");
+    FETCH.set("chat", () => sse([`UPDATE ${a}: Vasya drives a taxi (since March)\nDELETE ${b} -> ${a}\nDELETE ${d} -> ${c}`]));
+    const out = await runMemory(ctx, "/memory consolidate dry");
+    const lines = out.split("\n");
+    const iB = lines.indexOf("— Vasya is a taxi driver");
+    assert.ok(iB > 0, out);
+    assert.equal(lines[iB + 1], "  ↳ kept: Vasya drives a taxi (since March)"); // the UPDATEd text, not the old one
+    const iD = lines.indexOf("— Vasya owns a cat");
+    assert.equal(lines[iD + 1], "  ↳ kept: Vasya has a cat");
+    assert.deepEqual((await dbMemories(env, 96)).length, 4); // dry: untouched
+  });
+  test("a keep that is itself deleted in the same pass, or a plain DELETE, shows no kept line", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 97, chatType: "private" }), env, { ...DEFAULT_CHAT_DATA(), config: { lang: "en" } });
+    await addMemory(ctx, "keep", "auto");
+    const b = await addMemory(ctx, "drop me", "auto");
+    const c = await addMemory(ctx, "drop me too", "auto");
+    FETCH.set("chat", () => sse([`DELETE ${b} -> ${c}\nDELETE ${c}`]));
+    const out = await runMemory(ctx, "/memory consolidate");
+    assert.ok(!out.includes("↳"), out);
+    assert.deepEqual((await dbMemories(env, 97)).map(r => r.text), ["keep"]);
   });
 });
