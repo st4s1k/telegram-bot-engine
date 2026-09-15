@@ -11,7 +11,7 @@
 // the fact even when RAG is disabled. RECALL (recall.ts, over ragQueryMemories here) and AUTO-CURATION are under cfg.rag.
 // Everything is BEST-EFFORT: an AI/Vectorize error is logged and swallowed, never breaks the reply/history.
 
-import { RAG_EMBED_MODEL, RAG_MAX_EMBED_CHARS, RAG_META_TEXT_CAP, RAG_TIMEOUT_MS } from "./constants";
+import { RAG_EMBED_MODEL, RAG_MAX_EMBED_CHARS, RAG_META_TEXT_CAP, RAG_TIMEOUT_MS, RAG_REINDEX_BATCH } from "./constants";
 import type { Ctx, Env } from "./types";
 
 // Vector id and chat namespace are deterministic from chatId/memories.id.
@@ -72,6 +72,33 @@ export async function ragUpsertMemory(ctx: Ctx, mem: { id: number; text: string;
   } catch (e: any) {
     console.warn("rag.ragUpsertMemory failed", { chatId: ctx.chatId, err: e?.message || e });
   }
+}
+
+// Re-embed ALL of a chat's facts from their D1 rows and upsert them under their existing vector ids — the
+// repair for a store edited outside the bot (a direct D1 fix leaves the old embedding + metadata.text behind).
+// Batched (RAG_REINDEX_BATCH per embed call + upsert), each batch bounded by RAG_TIMEOUT_MS; a failed batch is
+// skipped (its facts keep their old vectors) and the counts say how many went through. /memory reindex, admin only.
+export async function ragReindexMemories(ctx: Ctx, facts: { id: number; text: string; source: string }[]): Promise<{ total: number; done: number }> {
+  const total = facts.length;
+  if (!ctx.env.VECTORIZE || !ctx.env.AI || !total) return { total, done: 0 };
+  let done = 0;
+  for (let i = 0; i < total; i += RAG_REINDEX_BATCH) {
+    const batch = facts.slice(i, i + RAG_REINDEX_BATCH);
+    try {
+      const vectors = await embedTexts(ctx.env, batch.map(f => f.text));
+      if (!vectors) continue;
+      const res = await withTimeout(ctx.env.VECTORIZE.upsert(batch.map((f, j) => ({
+        id: memVectorId(ctx.chatId, f.id),
+        values: vectors[j],
+        namespace: memNamespace(ctx.chatId),
+        metadata: { chat_id: String(ctx.chatId), mem_id: f.id, text: String(f.text).slice(0, RAG_META_TEXT_CAP), source: f.source },
+      }))), RAG_TIMEOUT_MS);
+      if (res) done += batch.length;
+    } catch (e: any) {
+      console.warn("rag.ragReindexMemories batch failed", { chatId: ctx.chatId, from: i, err: e?.message || e });
+    }
+  }
+  return { total, done };
 }
 
 // Delete vectors by id (on /memory forget). Gated on bindings only (we clean up regardless of the flag,

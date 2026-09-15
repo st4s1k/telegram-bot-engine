@@ -394,3 +394,45 @@ describe("parseExtractedFacts", () => {
     assert.deepEqual(parseExtractedFacts("ничего полезного", [], "en"), ["ничего полезного"]);
   });
 });
+
+describe("Memory · /memory reindex (admin only)", () => {
+  test("re-embeds every fact from its D1 row under the existing vector id — embedding AND metadata.text catch up", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 400, chatType: "private", username: "admin" }), env);
+    const a = await addMemory(ctx, "Лена сделала коррекцию зрения", "auto");
+    const b = await addMemory(ctx, "Стас водомут", "manual");
+    // a direct database repair, like the one done after the consolidation incident: the vector is now stale
+    await env.DB.prepare("UPDATE memories SET text=? WHERE id=?").bind("Лена планирует поставить зубной имплант", a).run();
+    const stale = env._vec.store.get(memVectorId(400, a));
+    const out = await runMemory(ctx, "/memory reindex");
+    assert.match(out, /Пере-эмбеддил фактов: 2 из 2/);
+    const fresh = env._vec.store.get(memVectorId(400, a));
+    assert.equal(fresh.metadata.text, "Лена планирует поставить зубной имплант");
+    assert.equal(fresh.metadata.mem_id, a);
+    assert.equal(fresh.namespace, memNamespace(400));
+    assert.notEqual(JSON.stringify(fresh.values), JSON.stringify(stale.values));
+    assert.equal(env._vec.store.get(memVectorId(400, b)).metadata.source, "manual"); // source kept
+    assert.equal(env._vec.store.size, 2);
+  });
+
+  test("works remotely via /admin chat_cmd (the target ctx keeps the admin's from)", async () => {
+    const env = ragEnv();
+    const target = makeCtxFor(makeMsg({ chatId: 401 }), env);
+    await addMemory(target, "факт", "auto");
+    const adminCtx = makeCtxFor(makeMsg({ chatId: 555, chatType: "private", username: "admin", text: "x" }), env);
+    const before = env._ai.calls.length;
+    const reply = await COMMANDS.admin(adminCtx, parseCommandAndArg("/admin chat_cmd 401 memory reindex", adminCtx.cfg));
+    assert.match(reply, /Пере-эмбеддил фактов: 1 из 1/);
+    assert.equal(env._ai.calls.length, before + 1); // one embed call for the batch
+  });
+
+  test("a non-admin gets the usual status instead; nothing is embedded", async () => {
+    const env = ragEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 402, username: "vasya" }), env);
+    await addMemory(ctx, "факт", "auto");
+    const before = env._ai.calls.length;
+    const out = await runMemory(ctx, "/memory reindex");
+    assert.ok(!/Пере-эмбеддил/.test(out), out);
+    assert.equal(env._ai.calls.length, before);
+  });
+});

@@ -93,6 +93,7 @@
   "mem_del_ok": "🗑 Deleted fact #{0}: {1}",
   "mem_dedupe_none": "🧹 No consecutive duplicates in history.",
   "mem_dedupe_ok": "🧹 Duplicates removed: {0}.",
+  "mem_reindex_ok": "🔁 Re-embedded facts: {0} of {1}.",
   "mem_size_show": "📏 Memory size: {0} chars.\nSet: `/memory size_chars 8000`",
   "mem_status": [
     "🧠 *Chat memory*",

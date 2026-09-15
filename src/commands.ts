@@ -11,6 +11,7 @@ import {
   getChatData, flushChatData, saveChatConfig, setPaused, setRole,
   clearChatHistory, dedupeChatHistory, addMemory, listMemories, clearMemories, deleteMemory, parseJson, messageStats,
 } from "./storage";
+import { ragReindexMemories } from "./rag";
 import { CONFIG_SCHEMA, CONFIG_PRESETS, getGlobalConfig, mergeConfig, buildHelp, buildConfigHelp, buildConfigGroupHelp, findConfigGroup, buildInfoStatus, setConfigParam } from "./config";
 import { fetchModelPrice, fetchOpenRouterUsage } from "./llm";
 import { sendTyping, sendAndStore, syncBotCommands } from "./telegram";
@@ -84,14 +85,10 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
   //   /admin chat <id>     — details of a single session
   //   /admin chat_cmd <id> <command> — run a command in another chat
   admin: async (ctx, mode) => {
-    const who = (ctx.msg?.from?.username || "").toLowerCase();
-    const fromId = ctx.msg?.from?.id;
     const isPrivate = ctx.msg?.chat?.type === "private";
     // Admins = ADMIN_USERNAMES (mutable @handle) OR ADMIN_USER_IDS (immutable account id — preferred), AND
     // only in private chats (don't expose it in groups). Otherwise behave as an ordinary message (no hint).
-    const isAdmin = (!!who && ctx.cfg.adminUsernames.includes(who))
-      || (fromId != null && ctx.cfg.adminUserIds.includes(Number(fromId)));
-    if (!isPrivate || !isAdmin) {
+    if (!isPrivate || !isAdminUser(ctx)) {
       return null;
     }
     const lang = ctx.cfg.lang;
@@ -332,6 +329,16 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
       const m = rows[n - 1];
       await deleteMemory(ctx, m.id);
       return t(lang, "mem_del_ok", n, m.text);
+    }
+
+    // /memory reindex — ADMIN ONLY (hidden from help): re-embed every fact of the chat from its D1 row, so the
+    // vectors (embedding + metadata.text) match the store again after a direct database repair. Works through
+    // `/admin chat_cmd <id> memory reindex` (the target ctx keeps the admin's `from`). Non-admins fall through.
+    if (sub === "reindex" && isAdminUser(ctx)) {
+      const rows = await listMemories(ctx.env, ctx.chatId);
+      if (!rows.length) return t(lang, "mem_list_empty");
+      const r = await ragReindexMemories(ctx, rows);
+      return t(lang, "mem_reindex_ok", r.done, r.total);
     }
 
     if (sub === "dedupe" || tList(lang, "mem_sub_dedupe").includes(sub)) {
@@ -598,6 +605,14 @@ setEngineCommands(ENGINE_COMMAND_PLUGINS);
 
 // COMMANDS/TECH/LLM are derived from a SINGLE list (core + persona). Adding a command = one object
 // in ENGINE_COMMAND_PLUGINS (core) or in the pack — names/flags are no longer duplicated anywhere else.
+// Is the sender of ctx.msg an admin (ADMIN_USERNAMES / ADMIN_USER_IDS)? Shared by /admin and the admin-only
+// /memory subcommands; a `chat_cmd` target ctx keeps the admin's `from`, so it passes there too.
+export function isAdminUser(ctx: Ctx): boolean {
+  const who = (ctx.msg?.from?.username || "").toLowerCase();
+  const fromId = ctx.msg?.from?.id;
+  return (!!who && ctx.cfg.adminUsernames.includes(who)) || (fromId != null && ctx.cfg.adminUserIds.includes(Number(fromId)));
+}
+
 export const COMMANDS: Record<string, CommandHandler> = Object.fromEntries(
   getAllCommands().map((c) => [c.type, c.handler]),
 );

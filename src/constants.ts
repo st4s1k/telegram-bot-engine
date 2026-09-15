@@ -40,6 +40,7 @@ export const RAG_REWRITE_HISTORY = 6;      // recent messages shown to the rewri
 export const RAG_REWRITE_MAX_TOKENS = 100; // one line of query
 export const RAG_REWRITE_MAX_CHARS = 300;
 export const RAG_REWRITE_TIMEOUT_MS = 6_000; // past this the raw query is used (the reply must not wait for a slow rewrite)
+export const RAG_REINDEX_BATCH = 50;       // /memory reindex: facts embedded + upserted per batch (bge-m3 takes up to 100 strings per call)
 // Curating facts on the bot's reply:
 export const MEM_CURATION_MIN_NEW = 2;     // don't run extraction while there are fewer new messages
 export const MEM_MAX_FACTS_PER_RUN = 5;    // maximum facts per single extraction pass
