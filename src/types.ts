@@ -263,7 +263,7 @@ export interface Ctx {
   visualKind: VisualKind | null;
   stickerEmoji: string;
   photoFromReply: boolean;
-  /** transient: ctx is an /admin chat_cmd preview in ANOTHER chat; write-through side effects (memory
+  /** transient: ctx is an /admin chat <id> preview in ANOTHER chat; write-through side effects (memory
    *  curation, etc.) must be suppressed so we don't write into the target chat (flush is skipped anyway) */
   _preview?: boolean;
   /** transient: the /summary handler just produced a FRESH digest (hadNew); tryCommand reads this after

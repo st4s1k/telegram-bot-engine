@@ -279,7 +279,7 @@ Persona env (switches/probabilities) is set by the pack.
   breaks them. (Implemented in `purgeExpiredData`, run once a day before the per-chat summaries.)
 - **On-demand erasure (per chat):** `/memory forget all` wipes a chat's history, facts (+ vectors), role,
   persona-state, photo cache and spend. An admin can erase **any** chat remotely with
-  `/admin chat_cmd <id> memory forget all`. This is the right-to-be-forgotten path for a single chat.
+  `/admin chat <id> /memory forget all`. This is the right-to-be-forgotten path for a single chat.
 
 ### `/config` keys
 
@@ -311,7 +311,7 @@ list of immutable Telegram **user ids** with the same access (preferred — a us
 re-registered by someone else). A user is an admin if they match *either* list. Both unset → **no admins**
 (the engine hardcodes no personal username/id).
 
-`/admin chat_cmd <id> <command>` runs **any** command in another chat (the reply goes to the admin).
+`/admin chat <id> /<command>` runs **any** command in another chat (the reply goes to the admin), and `/admin chat <id> <text>` previews the bot's reply to that text in that chat — its history, memory and persona — without sending or storing anything there.
 Control commands persist their effect in the target chat; **LLM commands are a preview**: they are not
 written to the target chat's history/memory/state.
 

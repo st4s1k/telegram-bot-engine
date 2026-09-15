@@ -5,7 +5,7 @@
 import { MEM_MAX_FACT_CHARS } from "./constants";
 import { t, tList, LOCALES } from "./i18n";
 import {
-  makeCtx, parseCommandAndArg, historyChars, tzParts,
+  makeCtx, parseCommandAndArg, historyChars, tzParts, stripBotAddressing,
 } from "./utils";
 import {
   getChatData, flushChatData, saveChatConfig, setPaused, setRole,
@@ -13,7 +13,9 @@ import {
 } from "./storage";
 import { ragReindexMemories } from "./rag";
 import { CONFIG_SCHEMA, CONFIG_PRESETS, getGlobalConfig, mergeConfig, buildHelp, buildConfigHelp, buildConfigGroupHelp, findConfigGroup, buildInfoStatus, setConfigParam } from "./config";
-import { fetchModelPrice, fetchOpenRouterUsage } from "./llm";
+import { fetchModelPrice, fetchOpenRouterUsage, runLLMWithHistory } from "./llm";
+import { recallMemories } from "./recall";
+import { buildDefaultPrompt } from "./prompts";
 import { sendTyping, sendAndStore, syncBotCommands } from "./telegram";
 import { runIncrementalSummary } from "./summary";
 import { runMemoryCuration } from "./curation";
@@ -83,7 +85,8 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
   //   /admin chats         — list of all sessions
   //   /admin stats         — aggregate across all sessions
   //   /admin chat <id>     — details of a single session
-  //   /admin chat_cmd <id> <command> — run a command in another chat
+  //   /admin chat <id> /<command> — run a command in another chat (reply to the admin)
+  //   /admin chat <id> <text>     — preview the bot's reply to that text in that chat (nothing sent/stored)
   admin: async (ctx, mode) => {
     const isPrivate = ctx.msg?.chat?.type === "private";
     // Admins = ADMIN_USERNAMES (mutable @handle) OR ADMIN_USER_IDS (immutable account id — preferred), AND
@@ -96,7 +99,7 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
     // the engine does not expose someone else's mechanics; without a pack/hook there simply is no flag.
     const personaAdminFlags = getPersona().adminFlags;
     const raw = mode.argText.trim();
-    const m = raw.match(/^(\S+)\s*([\s\S]*)$/); // [\s\S]* — don't lose a multiline argument (bulk chat_cmd)
+    const m = raw.match(/^(\S+)\s*([\s\S]*)$/); // [\s\S]* — don't lose a multiline argument (bulk /memory add via /admin chat <id> /…)
     const sub = (m ? m[1] : "").toLowerCase();
     const subArg = m ? m[2].trim() : "";
 
@@ -155,18 +158,29 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
       return t(lang, "adm_stats", chats, chats - groups, groups, mm.msgs, mm.chars, Number(c?.reqs) || 0, Number(c?.paused) || 0, Number(c?.with_role) || 0, (Number(c?.spend) || 0).toFixed(4));
     }
 
+    // /admin chat <id>              — session details
+    // /admin chat <id> /<command>   — run the command in that chat (adminRunInChat)
+    // /admin chat <id> <text>       — preview the bot's reply to that text in that chat (adminPreviewInChat)
     if (sub === "chat") {
-      if (!subArg) return t(lang, "adm_chat_need_id");
-      const row: any = await ctx.env.DB.prepare("SELECT * FROM chats WHERE chat_id=?").bind(subArg).first();
-      const mm = await messageStats(ctx.env, subArg);
+      // [\s\S]* — the tail may be multiline (bulk /memory add, a long message)
+      const cm = subArg.match(/^(\S+)\s*([\s\S]*)$/);
+      const chatArg = cm ? cm[1] : "";
+      const rest = cm ? cm[2].trim() : "";
+      if (!chatArg) return t(lang, "adm_chat_need_id");
+      if (rest) {
+        if (!/^-?\d+$/.test(chatArg)) return t(lang, "adm_cmd_need_id");
+        return rest.startsWith("/") ? adminRunInChat(ctx, chatArg, rest) : adminPreviewInChat(ctx, chatArg, rest);
+      }
+      const row: any = await ctx.env.DB.prepare("SELECT * FROM chats WHERE chat_id=?").bind(chatArg).first();
+      const mm = await messageStats(ctx.env, chatArg);
       const msgs = mm.msgs;
-      if (!row && !msgs) return t(lang, "adm_chat_notfound", subArg);
+      if (!row && !msgs) return t(lang, "adm_chat_notfound", chatArg);
       const cfg = parseJson<Record<string, any>>(row?.config, {});
       const cfgKeys = Object.keys(cfg);
       const photo = parseJson<Record<string, string>>(row?.photo_cache, {});
       const detailFlag = personaAdminFlags?.(parseJson<Record<string, unknown>>(row?.persona_state, {})) || "";
       return [
-        t(lang, "adm_chat_title", subArg),
+        t(lang, "adm_chat_title", chatArg),
         row?.name ? t(lang, "adm_chat_name", row.name) : t(lang, "adm_chat_name_unknown"),
         t(lang, "adm_chat_history", msgs, mm.chars),
         t(lang, "adm_chat_photos", Object.keys(photo).length),
@@ -176,61 +190,6 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
         t(lang, "adm_chat_model", cfg.model || t(lang, "adm_model_default")) + (cfg.vision_model ? ` · 👁 \`${cfg.vision_model}\`` : ""),
         cfgKeys.length ? t(lang, "adm_chat_settings", cfgKeys.map((k) => `\`${k}\``).join(", ")) : t(lang, "adm_chat_settings_default"),
       ].join("\n");
-    }
-
-    // /admin chat_cmd <chatId> <command> [params] — run ANY command in another chat.
-    // The reply goes to the ADMIN (not to the target chat). Content (LLM) commands are a preview: their side effects
-    // (history/memory/state) are NOT written to the target chat (flush is skipped + _preview suppresses curation).
-    // Control commands (rp/config/memory/arousal/stop/resume) persist their effect to the target chat.
-    if (sub === "chat_cmd") {
-      // subArg = "<chatId> <command> [params]". [\s\S]* — to also capture a multiline
-      // argument (e.g. bulk /memory add, one fact per line), instead of cutting at the first line break.
-      const cm = subArg.match(/^(\S+)\s*([\s\S]*)$/);
-      const targetId = cm ? cm[1] : "";
-      const cmdText = cm ? cm[2].trim() : "";
-      if (!/^-?\d+$/.test(targetId)) {
-        return t(lang, "adm_cmd_need_id");
-      }
-      if (!cmdText) {
-        return t(lang, "adm_cmd_need_cmd", targetId);
-      }
-
-      // Parse the subcommand with the same parser (add "/" if it was forgotten).
-      const cmdLine = cmdText.startsWith("/") ? cmdText : "/" + cmdText;
-      const subMode = parseCommandAndArg(cmdLine, ctx.cfg);
-      // ALL commands are allowed except `admin` itself (so as not to nest the admin panel recursively).
-      if (!isCommand(subMode.type) || subMode.type === "admin") {
-        return t(lang, "adm_cmd_bad", subMode.type || cmdLine);
-      }
-
-      // Load the target chat's data and build a temporary ctx on top of it.
-      const targetData = await getChatData(targetId, ctx.env);
-      const targetMsg: TgMessage = {
-        chat: { id: Number(targetId), type: Number(targetId) < 0 ? "group" : "private" },
-        message_id: 0,
-        from: ctx.msg.from, // for /rp etc. — let it be the admin
-        text: cmdLine,
-      };
-      // IMPORTANT: the effective config of the TARGET chat (not the admin's ctx.cfg) — otherwise model/
-      // info/config would show the admin's model and settings rather than the target chat's.
-      const targetCfg = mergeConfig(getGlobalConfig(ctx.env), targetData.config);
-      const targetCtx = makeCtx(targetMsg, ctx.env, targetCfg, targetData);
-      // Preview: for content (LLM) commands we mark the ctx to suppress write-through side effects
-      // (memory curation in /summary writes facts bypassing flush — without the flag they would leak into the target chat).
-      if (LLM_COMMANDS.has(subMode.type)) targetCtx._preview = true;
-
-      // Run the command in the target chat's context.
-      const out = await COMMANDS[subMode.type](targetCtx, subMode);
-
-      // Persist the target chat's changes ONLY for control commands. Content (LLM) commands are a
-      // preview for the admin: we do NOT persist their side effects (spend, /summary boundaries, memory curation) to
-      // the target chat — we skip flush, and the write-through (addMemory during curation) is suppressed by _preview above.
-      if (!LLM_COMMANDS.has(subMode.type) && targetCtx.chatData._dirty) {
-        await flushChatData(targetId, ctx.env, targetCtx.chatData);
-      }
-
-      // Return the reply to the ADMIN (to their chat), not to the target.
-      return t(lang, "adm_cmd_result", targetId, subMode.type, out || t(lang, "adm_cmd_noreply"));
     }
 
     return t(lang, "adm_unknown_sub", sub);
@@ -333,7 +292,7 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
 
     // /memory reindex — ADMIN ONLY (hidden from help): re-embed every fact of the chat from its D1 row, so the
     // vectors (embedding + metadata.text) match the store again after a direct database repair. Works through
-    // `/admin chat_cmd <id> memory reindex` (the target ctx keeps the admin's `from`). Non-admins fall through.
+    // `/admin chat <id> /memory reindex` (the target ctx keeps the admin's `from`). Non-admins fall through.
     if (sub === "reindex" && isAdminUser(ctx)) {
       const rows = await listMemories(ctx.env, ctx.chatId);
       if (!rows.length) return t(lang, "mem_list_empty");
@@ -605,8 +564,54 @@ setEngineCommands(ENGINE_COMMAND_PLUGINS);
 
 // COMMANDS/TECH/LLM are derived from a SINGLE list (core + persona). Adding a command = one object
 // in ENGINE_COMMAND_PLUGINS (core) or in the pack — names/flags are no longer duplicated anywhere else.
+/* ---------- admin: acting inside ANOTHER chat ---------- */
+
+// A temporary ctx on top of another chat's data: the TARGET chat's effective config (not the admin's — otherwise
+// model/info/config would show the admin's settings), the admin as `from` (for /rp etc.), message_id 0.
+async function adminTargetCtx(ctx: Ctx, targetId: string, text: string): Promise<Ctx> {
+  const targetData = await getChatData(targetId, ctx.env);
+  const targetMsg: TgMessage = {
+    chat: { id: Number(targetId), type: Number(targetId) < 0 ? "group" : "private" },
+    message_id: 0,
+    from: ctx.msg.from,
+    text,
+  };
+  const targetCfg = mergeConfig(getGlobalConfig(ctx.env), targetData.config);
+  return makeCtx(targetMsg, ctx.env, targetCfg, targetData);
+}
+
+// `/admin chat <id> /<command>`: run ANY command in another chat; the reply goes to the
+// ADMIN, not to the target. Content (LLM) commands are a preview: their side effects (history/memory/state) are NOT
+// written to the target chat (flush is skipped + _preview suppresses curation's write-through). Control commands
+// (rp/config/memory/…) persist their effect to the target chat. `admin` itself is rejected (no recursion).
+async function adminRunInChat(ctx: Ctx, targetId: string, cmdLine: string): Promise<string> {
+  const lang = ctx.cfg.lang;
+  const subMode = parseCommandAndArg(cmdLine, ctx.cfg);
+  if (!isCommand(subMode.type) || subMode.type === "admin") return t(lang, "adm_cmd_bad", subMode.type || cmdLine);
+  const targetCtx = await adminTargetCtx(ctx, targetId, cmdLine);
+  if (LLM_COMMANDS.has(subMode.type)) targetCtx._preview = true;
+  const out = await COMMANDS[subMode.type](targetCtx, subMode);
+  if (!LLM_COMMANDS.has(subMode.type) && targetCtx.chatData._dirty) await flushChatData(targetId, ctx.env, targetCtx.chatData);
+  return t(lang, "adm_cmd_result", targetId, subMode.type, out || t(lang, "adm_cmd_noreply"));
+}
+
+// `/admin chat <id> <text>`: a PREVIEW of the bot's regular reply to `text` as if it were said in that chat — the
+// target chat's history, long-term memory (rewrite → hybrid recall → dated facts) and persona/role, exactly the
+// default reply path minus the sending. Nothing goes to the target chat and nothing is stored: `_preview` blocks
+// write-through, the chats row is never flushed (spend counted on the throwaway ctx is dropped). The way to check
+// what the bot knows about a chat without posting there.
+async function adminPreviewInChat(ctx: Ctx, targetId: string, text: string): Promise<string> {
+  const lang = ctx.cfg.lang;
+  const targetCtx = await adminTargetCtx(ctx, targetId, text);
+  targetCtx._preview = true;
+  const q = stripBotAddressing(text, targetCtx.cfg);
+  const memories = q.length >= 4 ? await recallMemories(targetCtx, q) : [];
+  const out = await runLLMWithHistory(targetCtx.cfg, buildDefaultPrompt(targetCtx, memories), targetCtx.chatData.history, text, targetCtx.msg, { ctx: targetCtx });
+  return t(lang, "adm_msg_result", targetId, out);
+}
+
 // Is the sender of ctx.msg an admin (ADMIN_USERNAMES / ADMIN_USER_IDS)? Shared by /admin and the admin-only
-// /memory subcommands; a `chat_cmd` target ctx keeps the admin's `from`, so it passes there too.
+// /memory subcommands; an `/admin chat <id> /…` target ctx keeps the admin's `from`, so it passes there too.
 export function isAdminUser(ctx: Ctx): boolean {
   const who = (ctx.msg?.from?.username || "").toLowerCase();
   const fromId = ctx.msg?.from?.id;

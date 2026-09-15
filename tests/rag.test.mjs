@@ -100,10 +100,10 @@ describe("Memory · writing facts (not messages)", () => {
     assert.equal((await dbMemories(env, 96)).length, 2);
   });
 
-  test("/admin chat_cmd <id> memory add — multi-line bulk into the target chat", async () => {
+  test("/admin chat <id> /memory add — multi-line bulk into the target chat", async () => {
     const env = ragEnv();
     const adminCtx = makeCtxFor(makeMsg({ chatId: 555, chatType: "private", username: "admin", text: "x" }), env);
-    const mode = parseCommandAndArg("/admin chat_cmd 555 memory add\nфакт один\nфакт два", adminCtx.cfg);
+    const mode = parseCommandAndArg("/admin chat 555 /memory add\nфакт один\nфакт два", adminCtx.cfg);
     const reply = await COMMANDS.admin(adminCtx, mode);
     assert.match(reply, /Добавлено фактов: 2/);
     assert.equal((await dbMemories(env, 555)).length, 2); // facts went to the target chat 555
@@ -415,13 +415,13 @@ describe("Memory · /memory reindex (admin only)", () => {
     assert.equal(env._vec.store.size, 2);
   });
 
-  test("works remotely via /admin chat_cmd (the target ctx keeps the admin's from)", async () => {
+  test("works remotely via /admin chat <id> /… (the target ctx keeps the admin's from)", async () => {
     const env = ragEnv();
     const target = makeCtxFor(makeMsg({ chatId: 401 }), env);
     await addMemory(target, "факт", "auto");
     const adminCtx = makeCtxFor(makeMsg({ chatId: 555, chatType: "private", username: "admin", text: "x" }), env);
     const before = env._ai.calls.length;
-    const reply = await COMMANDS.admin(adminCtx, parseCommandAndArg("/admin chat_cmd 401 memory reindex", adminCtx.cfg));
+    const reply = await COMMANDS.admin(adminCtx, parseCommandAndArg("/admin chat 401 /memory reindex", adminCtx.cfg));
     assert.match(reply, /Пере-эмбеддил фактов: 1 из 1/);
     assert.equal(env._ai.calls.length, before + 1); // one embed call for the batch
   });

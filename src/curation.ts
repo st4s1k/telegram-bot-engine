@@ -154,7 +154,7 @@ export async function applyMemoryOps(ctx: Ctx, ops: MemoryOps): Promise<ApplyRes
 // Extract durable facts from NEW messages (id > boundary), reconciling them with the remembered ones.
 // Under cfg.rag, best-effort. Advance the _memUptoId boundary on LLM success (even with 0 ops).
 export async function runMemoryCuration(ctx: Ctx): Promise<void> {
-  if (ctx._preview) return; // /admin chat_cmd preview: writes are write-through (bypass flush), don't touch someone else's chat
+  if (ctx._preview) return; // /admin chat <id> preview: writes are write-through (bypass flush), don't touch someone else's chat
   if (!ctx.cfg.rag) return;
   try {
     const since = ctx.chatData._memUptoId || 0;

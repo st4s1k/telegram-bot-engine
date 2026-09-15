@@ -357,7 +357,7 @@ export async function updateMemory(ctx: Ctx, memId: number, text: string): Promi
 // Deployment-wide RETENTION sweep (env RETENTION_DAYS): delete history AND facts older than cutoffMs
 // across ALL chats — so a configured retention window genuinely expires data (privacy / right-to-be-
 // forgotten by time). Facts go row + Vectorize vector; messages are raw history. Best-effort + idempotent.
-// Per-chat on-demand erasure stays `/memory forget all` (also runnable on any chat via `/admin chat_cmd`).
+// Per-chat on-demand erasure stays `/memory forget all` (also runnable on any chat via `/admin chat <id> /memory forget all`).
 // Returns the deleted counts. Summary boundaries (id-based) are unaffected — ids are never reused.
 export async function purgeExpiredData(env: Env, cutoffMs: number): Promise<{ messages: number; memories: number }> {
   // Facts first: collect (chat_id, id) BEFORE deleting the rows, so we can drop the matching vectors.

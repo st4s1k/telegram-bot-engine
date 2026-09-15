@@ -109,29 +109,29 @@ describe("COMMANDS.admin", () => {
     assert.ok(out.includes("-100"));
     assert.ok(out.includes("Группа A"));
   });
-  test("chat_cmd: an allowed command runs in the target chat", async () => {
+  test("chat <id> /<cmd>: an allowed command runs in the target chat", async () => {
     const env = await adminEnv();
     const ctx = makeCtxFor(adminMsg(), env);
-    const out = await COMMANDS.admin(ctx, { argText: "chat_cmd -100 rp ты вежливый" });
+    const out = await COMMANDS.admin(ctx, { argText: "chat -100 /rp ты вежливый" });
     assert.ok(out.includes("rp"));
     assert.ok(out.includes("принята"));
     assert.equal((await dbChat(env, -100)).role, "ты вежливый"); // target chat updated in D1
   });
-  test("chat_cmd: info reads the target chat's status (its model, not the admin's)", async () => {
+  test("chat <id> /<cmd>: info reads the target chat's status (its model, not the admin's)", async () => {
     const ctx = makeCtxFor(adminMsg(), await adminEnv());
-    const out = await COMMANDS.admin(ctx, { argText: "chat_cmd -100 info" });
+    const out = await COMMANDS.admin(ctx, { argText: "chat -100 /info" });
     assert.ok(out.includes("info"));
     assert.ok(out.includes("🎭"));
     assert.ok(out.includes("m/x")); // the TARGET chat's model (config.model), not the admin's default test/model
   });
-  test("chat_cmd: model requests the price of the target chat's model, not the admin's default", async () => {
+  test("chat <id> /<cmd>: model requests the price of the target chat's model, not the admin's default", async () => {
     const ctx = makeCtxFor(adminMsg(), await adminEnv());
-    await COMMANDS.admin(ctx, { argText: "chat_cmd -100 model" });
+    await COMMANDS.admin(ctx, { argText: "chat -100 /model" });
     const urls = FETCH.of("/model/").map(c => c.url);
     assert.ok(urls.some(u => u.includes("/model/m/x")), urls.join(" | "));
     assert.ok(!urls.some(u => u.includes("test/model")), "the admin's model must not be requested");
   });
-  test("chat_cmd: an LLM preview does NOT persist to the target chat (memory/history/spend)", async () => {
+  test("chat <id> /<cmd>: an LLM preview does NOT persist to the target chat (memory/history/spend)", async () => {
     const env = makeEnv();
     await seedChat(env, -100, {
       config: { rag: true }, // curation enabled on the TARGET chat
@@ -146,15 +146,59 @@ describe("COMMANDS.admin", () => {
     // If curation ran (a bug), this response would be parsed into facts and sent to addMemory
     // (write-through, bypassing the skipped flush) → it would leak into the target chat's memory.
     FETCH.set("chat", () => sse(["- Ивана зовут Иван\n- Любит рыбалку"], { cost: 0.05 }));
-    const out = await COMMANDS.admin(ctx, { argText: "chat_cmd -100 summary" });
+    const out = await COMMANDS.admin(ctx, { argText: "chat -100 /summary" });
     assert.ok(out.includes("summary"));                    // the preview response returned to the admin
     assert.equal((await dbMemories(env, -100)).length, 0);  // curation suppressed in preview — facts did not leak
     assert.equal((await dbHistory(env, -100)).length, 3);   // the target chat's history is untouched
     assert.equal(Number((await dbChat(env, -100)).spend), 0.01); // existing spend not overwritten/not increased
   });
-  test("chat_cmd: the admin command is rejected (no recursion)", async () => {
+  test("chat <id> /<command> runs the command in the target chat (chat_cmd stays an alias)", async () => {
+    const env = await adminEnv();
+    const ctx = makeCtxFor(adminMsg(), env);
+    const out = await COMMANDS.admin(ctx, { argText: "chat -100 /rp ты вежливый" });
+    assert.ok(out.includes("rp") && out.includes("принята"), out);
+    assert.equal((await dbChat(env, -100)).role, "ты вежливый");
+    assert.match(await COMMANDS.admin(ctx, { argText: "chat -100 /admin chats" }), /недопустимая команда/i);
+    assert.match(await COMMANDS.admin(ctx, { argText: "chat abc /info" }), /числовой chatId/);
+  });
+  test("chat <id> <text>: a preview of the bot's reply IN that chat — its history + memory in the prompt; nothing sent or stored", async () => {
+    const env = makeEnv({ ENABLE_RAG: "true" });
+    await seedChat(env, -100, {
+      spend: 0.01, spendCount: 2, role: "ты вежливый",
+      history: [
+        { role: "user", content: "у Лены болят зубы", meta: { message_id: 1 } },
+        { role: "assistant", content: "ага", meta: { message_id: 2 } },
+      ],
+    });
+    const target = makeCtxFor(makeMsg({ chatId: -100, chatType: "group" }), env);
+    await H.addMemory(target, "Лена планирует поставить зубной имплант, но ещё не приняла окончательное решение.", "auto");
+    const ctx = makeCtxFor(adminMsg(), env);
+    let n = 0;
+    FETCH.set("chat", () => (++n === 1 ? sse(["Лена зубной имплант"]) : sse(["превью-ответ"])));
+    const out = await COMMANDS.admin(ctx, { argText: "chat -100 а она решилась на имплант?" });
+    assert.match(out, /превью ответа/);
+    assert.ok(out.includes("превью-ответ"), out);
+    const calls = FETCH.of("/chat/completions");
+    assert.equal(calls.length, 2); // 1: the recall query rewrite (there is prior history), 2: the reply
+    const reply = calls[1].body.messages;
+    const sys = reply[0].content;
+    assert.ok(sys.includes("зубной имплант"), sys);                        // the target chat's memory recalled (dated)
+    assert.ok(/\[\d{4}-\d{2}-\d{2}\] Лена планирует/.test(sys), sys);
+    assert.ok(sys.includes("ты вежливый"), sys);                          // the target chat's role
+    assert.ok(reply.some(m => m.role === "user" && m.content.includes("болят зубы")));   // its history
+    assert.ok(reply.at(-1).content.includes("а она решилась на имплант?"));            // the text itself
+    assert.equal(FETCH.sends().length, 0);                                  // nothing posted anywhere
+    assert.equal((await dbHistory(env, -100)).length, 2);                   // history untouched
+    assert.equal(Number((await dbChat(env, -100)).spend), 0.01);            // spend not persisted
+    assert.equal((await H.dbMemories(env, -100)).length, 1);                // memory untouched
+  });
+  test("chat <id> without a tail is still the session details", async () => {
     const ctx = makeCtxFor(adminMsg(), await adminEnv());
-    const out = await COMMANDS.admin(ctx, { argText: "chat_cmd -100 admin chats" });
+    assert.ok((await COMMANDS.admin(ctx, { argText: "chat -100" })).includes("Группа A"));
+  });
+  test("chat <id> /<cmd>: the admin command is rejected (no recursion)", async () => {
+    const ctx = makeCtxFor(adminMsg(), await adminEnv());
+    const out = await COMMANDS.admin(ctx, { argText: "chat -100 /admin chats" });
     assert.match(out, /недопустимая команда/i);
   });
 });
@@ -440,9 +484,9 @@ describe("audit: admin helpers", () => {
     const ctx = makeCtxFor(makeMsg({ username: "admin", chatType: "private" }), makeEnv());
     assert.match(await COMMANDS.admin(ctx, { argText: "chat" }), /Укажи id/);
   });
-  test("admin chat_cmd with a non-numeric id → error", async () => {
+  test("admin chat with a non-numeric id → error", async () => {
     const ctx = makeCtxFor(makeMsg({ username: "admin", chatType: "private" }), makeEnv());
-    assert.match(await COMMANDS.admin(ctx, { argText: "chat_cmd rp ты" }), /числовой chatId/);
+    assert.match(await COMMANDS.admin(ctx, { argText: "chat rp /ты" }), /числовой chatId/);
   });
   test("/admin commands → syncs the native menu and reports the count", async () => {
     const ctx = makeCtxFor(makeMsg({ username: "admin", chatType: "private" }), makeEnv());
