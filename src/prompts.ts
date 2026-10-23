@@ -24,6 +24,7 @@ export function assemblePrompt(instructions: string[], ctx: Ctx, memories: strin
   // defaultVoice="") the line is not needed — otherwise the prompt would get the junk `YOUR ROLE: ""`.
   if (persona) lines.push(t(lang, "prompt_role", persona));
   // Extra persona lines (flavor based on its OWN state — the engine does not know the semantics).
+  // Deliberately LAST: the closing line weighs most, so a persona state isn't drowned by command instructions.
   if (persona_pack.buildPromptLines) lines.push(...persona_pack.buildPromptLines(ctx));
   return lines.filter(Boolean).join("\n");
 }

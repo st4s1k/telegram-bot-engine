@@ -61,6 +61,7 @@ describe("trace · a chat reply, stage by stage", () => {
     await seedChat(env, 703, { paused: true });
     await handleTelegramMessage(makeMsg({ chatType: "private", chatId: 703, text: "эй" }), env);
     assert.deepEqual(brief(await events(env, 703)), ["route:paused silent"]);
+    await seedChat(env, -704, { config: { answer_prob: 0 } }); // no random answer (a pack's throw would otherwise fire now and then)
     await handleTelegramMessage(makeMsg({ chatType: "group", chatId: -704, text: "просто болтаем тут" }), env);
     assert.deepEqual(brief(await events(env, -704)), ["route:chat silent"]);
   });
@@ -91,9 +92,11 @@ describe("trace · cron and retention", () => {
     await seedChat(env, 720, { config: { rag: true }, history: [{ role: "user", content: "я живу в Кишинёве" }, { role: "user", content: "люблю вино" }] });
     // an old event (30 days) that must be purged
     await traceRaw(env, 720, startTrace("old"), "route", { kind: "chat" });
-    await env.DB.prepare("UPDATE trace_events SET ts=? WHERE trace='old'").bind(Date.now() - 30 * 86400_000).run();
+    const cronAt = Date.UTC(2026, 8, 16, 8, 0, 0); // 08:00 UTC = the gate (default TZ)
+    // 30 days before the cron run (not Date.now(): the cron time is pinned, so "old" must be too)
+    await env.DB.prepare("UPDATE trace_events SET ts=? WHERE trace='old'").bind(cronAt - 30 * 86400_000).run();
     FETCH.set("chat", () => sse(["NONE"]));
-    await runDailySummaries(env, Date.UTC(2026, 8, 16, 8, 0, 0)); // 08:00 UTC = the gate (default TZ)
+    await runDailySummaries(env, cronAt);
     const rows = await events(env, 720);
     assert.ok(!rows.some(r => r.trace === "old"), "old event purged");
     assert.ok(rows.some(r => r.stage === "cron" && r.kind === "curation" && r.outcome === "ran"), brief(rows).join(","));
