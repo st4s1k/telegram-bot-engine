@@ -18,7 +18,7 @@ import { recallMemories, rewriteRecallQuery, ragRetrieveMemories } from "./recal
 import { traceEvent, listTraces, getTrace, getTraceEvent, traceLLMStats, traceStageStats } from "./trace";
 import type { TraceEventRow } from "./trace";
 import { buildDefaultPrompt } from "./prompts";
-import { sendTyping, sendAndStore, syncBotCommands } from "./telegram";
+import { sendTyping, sendAndStore, syncBotCommands, sendTelegramMessage, leaveChat } from "./telegram";
 import { runIncrementalSummary } from "./summary";
 import { runMemoryCuration } from "./curation";
 import { getPersona, getPersonaStateDefaults, getAllCommands, setEngineCommands } from "./persona/registry";
@@ -600,6 +600,19 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
   retry: async () => null,
 };
 
+// /leave and its joke aliases — HIDDEN admin commands: the bot says a name-themed goodbye (`leave_bye_<name>`)
+// and leaves the chat it was typed in. Non-admins get silence (like /admin — no hint it exists); a private chat
+// can't be left → a hint. The goodbye is sent directly (not stored); the chat's data stays in D1, so re-adding
+// the bot resumes it. Also works remotely as `/admin chat <id> /eject`.
+export const LEAVE_COMMANDS = ["leave", "eject", "yeet", "ragequit", "adios", "sayonara", "gtfo"];
+const leaveHandler = (name: string): CommandHandler => async (ctx) => {
+  if (!isAdminUser(ctx)) return null;
+  const lang = ctx.cfg.lang;
+  if (ctx.msg?.chat?.type === "private") return t(lang, "leave_private");
+  await sendTelegramMessage(ctx.cfg.telegramToken, ctx.chatId, t(lang, "leave_bye_" + name), undefined);
+  return (await leaveChat(ctx.cfg.telegramToken, ctx.chatId)) ? null : t(lang, "leave_failed");
+};
+
 // The engine's core commands — self-describing plugins (the SAME RegisteredCommand contract as the persona):
 // name (defaultCmd) + flags (llm/skipHistory) + handler in a single object. Order = priority in the regex
 // (the core names do not overlap by prefix). They are all tech (skipHistory) — service output, not the bot's speech;
@@ -608,6 +621,7 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
 // (e.g. /admin). The menu order follows this list (engine), then the pack's commands.
 const ENGINE_COMMAND_PLUGINS: RegisteredCommand[] = [
   { type: "admin",   defaultCmd: "/admin",   skipHistory: true, handler: ENGINE_COMMANDS.admin },
+  ...LEAVE_COMMANDS.map((n): RegisteredCommand => ({ type: n, defaultCmd: "/" + n, skipHistory: true, handler: leaveHandler(n) })), // hidden, admin-only
   { type: "start",   defaultCmd: "/start",   skipHistory: true, menuDesc: "menu_start",   handler: ENGINE_COMMANDS.start },
   { type: "help",    defaultCmd: "/help",    skipHistory: true, menuDesc: "menu_help",    handler: ENGINE_COMMANDS.help },
   { type: "info",    defaultCmd: "/info",    skipHistory: true, menuDesc: "menu_info",    handler: ENGINE_COMMANDS.info },

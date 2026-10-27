@@ -27,7 +27,7 @@ const {
   // harness
   makeEnv, makeMsg, makeKV, makeCtxFor, photoSizes, sse, jsonResp, streamResp,
   stubRandom, restoreRandom, CONSOLE, clearConsole, FETCH, newFetch,
-  seedChat, dbChat, dbHistory, dbMemories,
+  seedChat, dbChat, dbHistory, dbMemories, buildBotCommands, LEAVE_COMMANDS,
 } = H;
 
 
@@ -493,5 +493,57 @@ describe("audit: admin helpers", () => {
     const out = await COMMANDS.admin(ctx, { argText: "commands" });
     assert.ok(FETCH.of("/setMyCommands").length > 0);
     assert.match(out, /setMyCommands/);
+  });
+});
+
+describe("/leave (hidden, admin-only)", () => {
+  test("an admin in a group: the bot says goodbye, then leaves that chat; nothing stored", async () => {
+    const env = makeEnv();
+    await handleTelegramMessage(makeMsg({ username: "admin", chatType: "group", chatId: -300, text: "/leave" }), env);
+    const sends = FETCH.sends();
+    assert.equal(sends.length, 1);
+    assert.equal(sends[0].body.chat_id, -300);
+    assert.match(sends[0].body.text, /ушёл/);
+    const leaves = FETCH.of("/leaveChat");
+    assert.equal(leaves.length, 1);
+    assert.equal(leaves[0].body.chat_id, -300);
+    assert.ok(FETCH.calls.indexOf(sends[0]) < FETCH.calls.indexOf(leaves[0]), "goodbye first, then leave");
+    assert.ok(!(await dbHistory(env, -300)).some(h => /ушёл|leave/.test(h.content)));
+  });
+  test("a non-admin: silence, the bot stays", async () => {
+    const env = makeEnv();
+    await handleTelegramMessage(makeMsg({ username: "rando", chatType: "group", chatId: -301, text: "/leave" }), env);
+    assert.equal(FETCH.of("/leaveChat").length, 0);
+    assert.equal(FETCH.sends().length, 0);
+  });
+  test("an admin in a private chat: a hint, no leaveChat", async () => {
+    const ctx = makeCtxFor(makeMsg({ username: "admin", chatType: "private" }), makeEnv());
+    assert.match(await COMMANDS.leave(ctx, { argText: "" }), /личного чата/);
+    assert.equal(FETCH.of("/leaveChat").length, 0);
+  });
+  test("Telegram refuses leaveChat → the admin is told", async () => {
+    FETCH.set("leaveChat", () => jsonResp({ ok: false, description: "Bad Request: chat not found" }));
+    const ctx = makeCtxFor(makeMsg({ username: "admin", chatType: "group", chatId: -302 }), makeEnv());
+    assert.match(await COMMANDS.leave(ctx, { argText: "" }), /Не получилось/);
+  });
+  test("every alias leaves with its own goodbye (/eject@bot in a group too)", async () => {
+    const byes = new Set();
+    for (const [i, name] of LEAVE_COMMANDS.entries()) {
+      const env = makeEnv(), chatId = -400 - i;
+      newFetch();
+      await handleTelegramMessage(makeMsg({ username: "admin", chatType: "group", chatId, text: `/${name}@testbot` }), env);
+      assert.equal(FETCH.of("/leaveChat").length, 1, name);
+      const text = FETCH.sends()[0].body.text;
+      assert.ok(!text.includes("leave_bye_"), name + ": goodbye key resolved");
+      byes.add(text);
+    }
+    assert.equal(byes.size, LEAVE_COMMANDS.length, "each alias has its own goodbye");
+    assert.deepEqual(LEAVE_COMMANDS, ["leave", "eject", "yeet", "ragequit", "adios", "sayonara", "gtfo"]);
+  });
+  test("hidden: no menu entry, not in /help", async () => {
+    for (const name of LEAVE_COMMANDS) {
+      assert.ok(!buildBotCommands("ru").some(c => c.command === name), name);
+      assert.ok(!buildHelp("ru").includes("/" + name), name);
+    }
   });
 });

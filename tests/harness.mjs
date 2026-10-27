@@ -107,6 +107,7 @@ function defaultResponders() {
     getFile: () => jsonResp({ ok: true, result: { file_path: "photos/f.jpg" } }),
     getChat: () => jsonResp({ ok: true, result: { title: "Группа" } }),
     setMyCommands: () => jsonResp({ ok: true, result: true }),
+    leaveChat: () => jsonResp({ ok: true, result: true }),
   };
 }
 function resetFetch() { _calls = []; _responders = defaultResponders(); }
@@ -136,6 +137,7 @@ globalThis.fetch = async (url, opts = {}) => {
     if (u.includes("/getFile")) return _responders.getFile(call);
     if (u.includes("/setMyCommands")) return _responders.setMyCommands(call);
     if (u.includes("/getChat")) return _responders.getChat(call);
+    if (u.includes("/leaveChat")) return _responders.leaveChat(call);
     throw new Error("unexpected fetch: " + method + " " + u);
   };
   // Like real fetch: ac.abort(reason) → the promise rejects with that reason. Racing the response

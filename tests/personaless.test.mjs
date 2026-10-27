@@ -5,6 +5,7 @@ const {
   assemblePrompt, buildHelp, buildInfoStatus, messageMentionsBot, buildCommandRegex,
   COMMANDS, getGlobalConfig, DEFAULT_CHAT_DATA, makeEnv, makeMsg, makeCtxFor,
   seedChat,
+  LEAVE_COMMANDS,
 } = H;
 
 // The persona's localized texts are baked into the engine i18n at BUILD time (the generate step), so a
@@ -69,7 +70,7 @@ describe("personaless (neutral pack)", () => {
 
   test("buildCommandRegex: without a persona — only engine commands", () => {
     const types = buildCommandRegex(makeEnv(), "neutral_probe_bot").map((e) => e.type);
-    const ENGINE = ["admin", "help", "config", "memory", "model", "summary", "rp", "info", "stop", "resume", "lang", "alias", "start", "retry"];
+    const ENGINE = ["admin", "help", "config", "memory", "model", "summary", "rp", "info", "stop", "resume", "lang", "alias", "start", "retry", ...LEAVE_COMMANDS];
     for (const t of ENGINE) assert.ok(types.includes(t), `engine command ${t} must be present`);
     // and NOTHING beyond the engine: with no registered persona, no extra commands appear
     assert.deepEqual(types.slice().sort(), ENGINE.slice().sort());

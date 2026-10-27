@@ -49,6 +49,15 @@
   "mem_extract_known": "Already known (reference by [id] for UPDATE; do NOT ADD these again):",
 
   "cmd_unknown": "🤷 I don't know the command `{0}`.\nType `/help` for the list of commands.",
+  "leave_bye_leave": "👋 That's it, I'm out.",
+  "leave_bye_eject": "🪂 Ejecting. Bye, everyone!",
+  "leave_bye_yeet": "🫳 Yeet! Throwing myself out.",
+  "leave_bye_ragequit": "😤 That's it, I'm out. Ragequit.",
+  "leave_bye_adios": "🌵 Adiós, amigos.",
+  "leave_bye_sayonara": "🎌 Sayonara!",
+  "leave_bye_gtfo": "🚪 I'm out of here. Don't miss me.",
+  "leave_private": "🤷 A private chat can't be left — `/leave` works in groups.",
+  "leave_failed": "⚠️ Couldn't leave the chat (Telegram refused).",
   "retry_nothing": "🤷 Nothing to retry — I don't see a recent message of yours.",
   "retry_hint": "↻ Tap to retry: /retry",
 
@@ -194,7 +203,8 @@
     "`/admin chat <id> <text>` — preview the bot's reply to that text in chat <id> (its history, memory, persona); nothing is sent or stored there",
     "`/admin commands` — refresh the native command menu (setMyCommands) now",
     "`/admin trace` — 24 h metrics · `/admin trace <id> [n]` — the chat's latest traces, stage by stage · `/admin trace <traceId>` — one trace in full",
-    "`/admin event <id>` — one event in full (an LLM call: prompt, question, memory, response)"
+    "`/admin event <id>` — one event in full (an LLM call: prompt, question, memory, response)",
+    "`/leave` (or `/eject` `/yeet` `/ragequit` `/adios` `/sayonara` `/gtfo`) — in a group: the bot says goodbye and leaves that chat; hidden"
   ],
   "adm_commands_synced": "✅ Command menu refreshed ({0} setMyCommands call(s) OK).",
   "adm_no_sessions": "📭 No active sessions.",

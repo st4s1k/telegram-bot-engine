@@ -58,6 +58,11 @@ _Most commands with **no argument** show the current state/details — noted as 
 > `/admin` is a **hidden** command (usernames in `ADMIN_USERNAMES` **or** ids in `ADMIN_USER_IDS`, private
 > chats only): inspect all sessions, statistics, run any command remotely in another chat, and
 > `/admin commands` to refresh the native command menu. It is never advertised.
+>
+> `/leave` (and its joke aliases `/eject`, `/yeet`, `/ragequit`, `/adios`, `/sayonara`, `/gtfo`) is also
+> **hidden** and admin-only, but works **in any group**: the bot posts a name-themed goodbye (`leave_bye_<name>`)
+> and leaves the chat (Telegram `leaveChat`). Non-admins get silence; in a private chat it answers with a hint.
+> The chat's data stays in D1, so re-adding the bot resumes it. Remotely: `/admin chat <id> /eject`.
 
 > **Unknown command:** an unrecognized `/command` addressed to the bot (a private chat, `/cmd@thisbot`, or
 > an @mention) gets a brief `/help` pointer (`cmd_unknown`) instead of being sent to the LLM.

@@ -108,6 +108,24 @@ export function toMarkdownV2(text: string): string {
   return out;
 }
 
+// Leaves the chat (Telegram leaveChat) — the hidden admin /leave. True only on Telegram's ok; never throws.
+export async function leaveChat(token: string | undefined, chatId: number): Promise<boolean> {
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/leaveChat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId }),
+      signal: AbortSignal.timeout(GETFILE_TIMEOUT_MS),
+    });
+    const data: any = await res.json().catch(() => null);
+    if (!data?.ok) console.warn("leaveChat failed", { chatId, description: data?.description });
+    return !!data?.ok;
+  } catch (e: any) {
+    console.warn("leaveChat threw", { chatId, err: e?.message || e });
+    return false;
+  }
+}
+
 // Shows the "bot is typing…" indicator in the chat. An instant reaction while the model thinks.
 // The action lives ~5s in Telegram; for long replies that's enough as a "bot is alive" signal.
 export async function sendTyping(ctx: Ctx): Promise<void> {
