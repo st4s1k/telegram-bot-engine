@@ -351,6 +351,30 @@ export function linkifySummaryTimes(text: string, items: HistoryItem[], chatId: 
   });
 }
 
+// Reorder a digest's topics chronologically. Topics are blank-line-separated blocks whose FIRST line (the title)
+// carries the topic's start HH:MM (prompt_summary asks for it). The key is the position of the first summarized
+// message at that minute — not the clock value, so a digest spanning midnight keeps 23:50 before 00:10. Stable;
+// if any block has no time or its time matches no message, the digest is returned untouched (never mangle).
+export function sortSummaryTopics(text: string, items: HistoryItem[], tz: string = "UTC"): string {
+  const blocks = text.trim().split(/\n[ \t]*\n/);
+  if (blocks.length < 2) return text;
+  const firstIdx: Record<string, number> = {};
+  items.forEach((it, i) => {
+    const ts = it.meta?.ts;
+    if (!ts) return;
+    const hhmm = tzStamp(ts, tz).slice(11);
+    if (!(hhmm in firstIdx)) firstIdx[hhmm] = i;
+  });
+  const keyed: { block: string; key: number }[] = [];
+  for (const block of blocks) {
+    const m = block.split("\n")[0].match(/\b(\d{1,2}):(\d{2})\b/);
+    const key = m ? firstIdx[`${m[1].padStart(2, "0")}:${m[2]}`] : undefined;
+    if (key === undefined) return text;
+    keyed.push({ block, key });
+  }
+  return keyed.sort((a, b) => a.key - b.key).map(k => k.block).join("\n\n");
+}
+
 // Append a tappable "previous summary" deep-link to a fresh /summary digest, so each summary links back to
 // the one before it. Like the HH:MM links above, a per-message deep-link (t.me/c/<id>/<msg_id>) only exists
 // in SUPERGROUPS (chat_id like -100…) — in private chats / basic groups there are none, so the text is

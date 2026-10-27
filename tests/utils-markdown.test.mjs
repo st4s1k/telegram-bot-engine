@@ -17,7 +17,7 @@ const {
   PHOTO_DELIM,
   DEFAULT_CHAT_DATA, getChatData, flushChatData, updatePersonaState, setRole, setPaused, saveChatConfig,
   addSpend, cachePhotoDesc, PHOTO_CACHE_CAP,
-  callOpenRouter, runLLMWithHistory, toLLMMessages, formatWithMeta, linkifySummaryTimes, asciiHeader,
+  callOpenRouter, runLLMWithHistory, toLLMMessages, formatWithMeta, linkifySummaryTimes, sortSummaryTopics, asciiHeader,
   fetchModelPrice, fetchOpenRouterUsage,
   getTelegramPhotoUrl, runVision, handlePhotoMessage, describeCtxPhoto, getReplySource,
   logIgnoredPhoto,
@@ -56,6 +56,21 @@ describe("utilities", () => {
     // non-supergroup (private id / basic group -id without -100) → no per-message links → unchanged
     assert.equal(linkifySummaryTimes("в 10:25 что-то", items, 555, "UTC"), "в 10:25 что-то");
     assert.equal(linkifySummaryTimes("в 10:25 что-то", items, -123456, "UTC"), "в 10:25 что-то");
+  });
+
+  test("sortSummaryTopics: topics reordered by their first message (midnight-safe); untouched when a time is missing", () => {
+    const base = Date.UTC(2026, 9, 27, 23, 50);
+    const items = [
+      { role: "user", content: "a", meta: { message_id: 1, ts: base } },                  // 23:50
+      { role: "user", content: "b", meta: { message_id: 2, ts: base + 20 * 60_000 } },    // 00:10 (next day)
+      { role: "user", content: "c", meta: { message_id: 3, ts: base + 40 * 60_000 } },    // 00:30
+    ];
+    const digest = "*Офис* (00:30)\n— c\n\n*Зуб* (23:50)\n— a\n\n*Собес* (00:10)\n— b";
+    assert.equal(sortSummaryTopics(digest, items, "UTC"), "*Зуб* (23:50)\n— a\n\n*Собес* (00:10)\n— b\n\n*Офис* (00:30)\n— c");
+    const noTime = "*Офис* (00:30)\n— c\n\n*Разное*\n— x";
+    assert.equal(sortSummaryTopics(noTime, items, "UTC"), noTime);
+    const unknown = "*Офис* (00:30)\n— c\n\n*Зуб* (09:99)\n— a";
+    assert.equal(sortSummaryTopics(unknown, items, "UTC"), unknown);
   });
 
   test("linkifySummaryTimes: a busy minute links the speaker named right before the time", () => {

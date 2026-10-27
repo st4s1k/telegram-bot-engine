@@ -7,7 +7,7 @@ import { SUMMARY_MAX_TOKENS } from "./constants";
 import { messagesSince } from "./storage";
 import { runLLMWithHistory } from "./llm";
 import { buildSummaryPrompt } from "./prompts";
-import { isFallbackMessage, linkifySummaryTimes, appendPrevSummaryLink } from "./utils";
+import { isFallbackMessage, linkifySummaryTimes, appendPrevSummaryLink, sortSummaryTopics } from "./utils";
 import { t } from "./i18n";
 import type { Ctx } from "./types";
 
@@ -26,7 +26,7 @@ export async function runIncrementalSummary(
     return { text: t(ctx.cfg.lang, "sum_too_few"), maxId: sinceId, hadNew: false };
   }
 
-  const summary = await runLLMWithHistory(
+  const digest = await runLLMWithHistory(
     ctx.cfg,
     buildSummaryPrompt(ctx, ctx.chatData._summary || undefined),
     items, // only the new slice, NOT the entire history window
@@ -37,7 +37,9 @@ export async function runIncrementalSummary(
     { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel, maxTokens: SUMMARY_MAX_TOKENS, reasoning: false, kind: "summary" }
   );
 
-  if (isFallbackMessage(summary)) return { text: summary, maxId: sinceId, hadNew: false };
+  if (isFallbackMessage(digest)) return { text: digest, maxId: sinceId, hadNew: false };
+  // The model doesn't keep topics in chronological order — put them in the order of their first message.
+  const summary = sortSummaryTopics(digest, items, ctx.cfg.timezone);
   ctx.chatData._summary = summary; // store the RAW digest (fed back as "already known" context next time)
   ctx.chatData._dirty = true;
   // …but SHOW it with HH:MM timestamps linkified to the messages they reference, plus a deep-link back to the
