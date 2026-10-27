@@ -63,4 +63,5 @@ export const MEM_KNOWN_SHOWN = 40;         // how many recent known facts the ex
                                               // 4, not 10: measured on z-ai/glm-5.3-flash, 9 concurrent passes slowed each from ~20 s to 18–50 s (per-key throughput is shared) and 6/9 failed
 export const MEM_APPLY_PARALLEL = 8;              // memory ops applied concurrently per phase (D1 + Vectorize + embed each)
 export const MEM_UPDATE_MIN_RATIO = 0.5;          // an UPDATE may not shrink a fact below this share of its length (compression ≠ correction)
+export const SUMMARY_LINK_NAME_WINDOW = 40; // linkifySummaryTimes: how far back (chars, same line) a speaker name before HH:MM picks their message
 export const SUMMARY_MAX_TOKENS = 2000;    // response cap for the /summary digest (auxiliary call; was 1000 — see the NOTE above)

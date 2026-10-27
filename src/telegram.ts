@@ -236,6 +236,12 @@ export async function sendAndStore(ctx: Ctx, content: string, { skipHistory = fa
     while (i < outText.length) {
       let end = Math.min(i + TELEGRAM_MSG_LIMIT, outText.length);
       if (end < outText.length) {
+        // Prefer a line break (then a space) in the chunk's second half — a hard cut mid-line could split a
+        // `[text](url)` link (a long /summary digest did) or a word; links never span a line.
+        const nl = outText.lastIndexOf("\n", end - 1);
+        const sp = outText.lastIndexOf(" ", end - 1);
+        const half = i + TELEGRAM_MSG_LIMIT / 2;
+        if (nl >= half) end = nl + 1; else if (sp >= half) end = sp + 1;
         const c = outText.charCodeAt(end - 1);
         if (c >= 0xD800 && c <= 0xDBFF) end--; // the boundary landed on a high surrogate → its pair moves to the next chunk
       }

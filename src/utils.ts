@@ -4,7 +4,7 @@
 // constructor makeCtx and the shouldAnswer decision also live here — they are needed by
 // the lower layers (storage/flow/vision), so they can't live in the "heavy" vision layer.
 
-import { ROOTS_LIMIT, REQ_ID_LEN } from "./constants";
+import { ROOTS_LIMIT, REQ_ID_LEN, SUMMARY_LINK_NAME_WINDOW } from "./constants";
 import { getPersona, getPersonaTexts, getAllFallbackTexts } from "./persona/registry";
 import { t, DEFAULT_LANG } from "./i18n";
 import type {
@@ -324,19 +324,30 @@ export function linkifySummaryTimes(text: string, items: HistoryItem[], chatId: 
   const sg = String(chatId).match(/^-100(\d+)$/);
   if (!sg) return text;                       // not a supergroup → no per-message deep-links
   const internal = sg[1];
-  const byMinute: Record<string, number> = {}; // "HH:MM" → first message_id at that minute
+  // "HH:MM" → the messages sent at that minute, in order (a busy minute holds several speakers).
+  const byMinute: Record<string, { id: number; name: string }[]> = {};
   for (const it of items) {
     const id = it.meta?.message_id;
     const ts = it.meta?.ts;
     if (!id || !ts) continue;
     const hhmm = tzStamp(ts, tz).slice(11);     // "YYYY-MM-DD HH:MM" → "HH:MM"
-    if (!(hhmm in byMinute)) byMinute[hhmm] = id;
+    (byMinute[hhmm] ||= []).push({ id, name: String(it.meta?.name || "").toLowerCase() });
   }
   if (!Object.keys(byMinute).length) return text;
   // Link each HH:MM (1–2 digit hour); intervals like "10:25–10:40" linkify both ends independently.
-  return text.replace(/\b(\d{1,2}):(\d{2})\b/g, (whole, h: string, mm: string) => {
-    const id = byMinute[`${h.padStart(2, "0")}:${mm}`];
-    return id ? `[${whole}](https://t.me/c/${internal}/${id})` : whole;
+  // The target is the message of the speaker named right before the time on the same line («Алёна (11:45)»
+  // → Алёна's message, not whoever wrote first that minute); no name nearby → the minute's first message.
+  return text.replace(/\b(\d{1,2}):(\d{2})\b/g, (whole: string, h: string, mm: string, offset: number) => {
+    const cands = byMinute[`${h.padStart(2, "0")}:${mm}`];
+    if (!cands) return whole;
+    const lineStart = text.lastIndexOf("\n", offset - 1) + 1;
+    const before = text.slice(Math.max(lineStart, offset - SUMMARY_LINK_NAME_WINDOW), offset).toLowerCase();
+    let best = cands[0], bestPos = -1;
+    for (const c of cands) {
+      const p = c.name ? before.lastIndexOf(c.name) : -1;
+      if (p > bestPos) { bestPos = p; best = c; }
+    }
+    return `[${whole}](https://t.me/c/${internal}/${best.id})`;
   });
 }
 

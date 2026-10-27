@@ -58,6 +58,19 @@ describe("utilities", () => {
     assert.equal(linkifySummaryTimes("в 10:25 что-то", items, -123456, "UTC"), "в 10:25 что-то");
   });
 
+  test("linkifySummaryTimes: a busy minute links the speaker named right before the time", () => {
+    const at = Date.UTC(2026, 9, 27, 12, 5);
+    const items = [
+      { role: "user", content: "a", meta: { message_id: 432, name: "Стас", ts: at } },
+      { role: "user", content: "b", meta: { message_id: 433, name: "Ana-Maria", ts: at + 10_000 } },
+      { role: "user", content: "c", meta: { message_id: 434, name: "Глеб", ts: at + 20_000 } },
+    ];
+    const out = linkifySummaryTimes("— Ana-Maria (12:05) против. Глеб (12:05) не согласен.\n*Тема* (12:05)", items, -1001234567890, "UTC");
+    assert.match(out, /Ana-Maria \(\[12:05\]\(https:\/\/t\.me\/c\/1234567890\/433\)\)/);
+    assert.match(out, /Глеб \(\[12:05\]\(https:\/\/t\.me\/c\/1234567890\/434\)\)/);
+    assert.match(out, /\*Тема\* \(\[12:05\]\(https:\/\/t\.me\/c\/1234567890\/432\)\)/); // no name on its line → the minute's first message
+  });
+
   test("pickOne returns an array element (deterministically via random)", () => {
     stubRandom(0);
     assert.equal(pickOne(["a", "b", "c"]), "a");

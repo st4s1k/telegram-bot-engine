@@ -101,6 +101,19 @@ describe("sendAndStore", () => {
     assert.equal(sends.map(s => s.body.text).join(""), text);    // joined chunks = original text
   });
 
+  test("splitting prefers a line break, so a [time](link) on a long line is never cut in half", async () => {
+    const ctx = makeCtxFor(makeMsg({ message_id: 302 }), makeEnv());
+    const line = "— Глеб [11:28](https://t.me/c/123/131389) сказал что-то важное по теме\n";
+    const text = line.repeat(Math.ceil((TELEGRAM_MSG_LIMIT * 1.5) / line.length)).trim();
+    await sendAndStore(ctx, text);
+    const sends = FETCH.sends();
+    assert.equal(sends.length, 2);
+    for (const s of sends) {
+      assert.equal((s.body.text.match(/\[/g) || []).length, (s.body.text.match(/\)/g) || []).length, "links stay whole");
+      assert.ok(!/\]\(https:\/[^)]*$/.test(s.body.text), "no link cut at the chunk end");
+    }
+  });
+
   test("skipHistory does not write to history", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     await sendAndStore(ctx, "технический ответ", { skipHistory: true });
