@@ -25,7 +25,7 @@ const {
   RANDOM_HANDLERS,
   TELEGRAM_MSG_LIMIT, HISTORY_HARD_CAP_ITEMS, FALLBACK_LLM_ERROR, FALLBACK_NO_CREDITS,
   // harness
-  makeEnv, makeMsg, makeKV, makeCtxFor, photoSizes, sse, jsonResp, streamResp,
+  buildSummaryPrompt, makeEnv, makeMsg, makeKV, makeCtxFor, photoSizes, sse, jsonResp, streamResp,
   stubRandom, restoreRandom, CONSOLE, clearConsole, FETCH, newFetch,
   seedChat, dbChat, dbHistory,
 } = H;
@@ -39,6 +39,12 @@ describe("prompts", () => {
   test("buildVisionPrompt contains the PHOTO_DELIM separator", () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     assert.ok(buildVisionPrompt(ctx).includes(PHOTO_DELIM));
+  });
+  test("buildSummaryPrompt asks for HH:MM per topic (they become message links)", () => {
+    const ctx = makeCtxFor(makeMsg(), makeEnv());
+    assert.ok(buildSummaryPrompt(ctx).includes("ЧЧ:ММ"));
+    ctx.cfg.lang = "en";
+    assert.ok(buildSummaryPrompt(ctx).includes("HH:MM"));
   });
 });
 

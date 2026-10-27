@@ -26,7 +26,8 @@
   "prompt_photo_cache": "In the photo (by description): \"{0}\". Reply to / comment on this photo in your style.",
   "prompt_summary": [
     "Make a SHORT summary of the NEW messages in this chat (what's new). Group it by TOPIC of discussion, NOT by participant: each bullet is one topic, and within it briefly note who said or suggested what. Main topics, key takeaways — concise and to the point.",
-    "No preambles like \"here's the summary\" — get straight to it. Don't make up anything that wasn't in the messages."
+    "No preambles like \"here's the summary\" — get straight to it. Don't make up anything that wasn't in the messages.",
+    "For each topic give the time of its key messages — HH:MM exactly as in the message tag, at least one per topic, e.g. \"Gleb (14:05) suggested…\". Only HH:MM, no date or seconds: the time becomes a link to the message."
   ],
   "prompt_summary_prev": [
     "Below is the PREVIOUS summary of this chat. Do NOT repeat its content — describe only what's NEW. If there's nothing substantially new, say so in one short phrase.",
