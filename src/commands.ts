@@ -2,7 +2,7 @@
 // COMMANDS: type → async (ctx, mode) => string|null (null/empty = stay silent). TECH_COMMANDS —
 // their output is NOT written to history; LLM_COMMANDS — content commands (with "typing", stored).
 
-import { MEM_MAX_FACT_CHARS } from "./constants";
+import { MEM_MAX_FACT_CHARS, REASONING_EFFORTS } from "./constants";
 import { t, tList, LOCALES } from "./i18n";
 import {
   makeCtx, parseCommandAndArg, historyChars, tzParts, tzStamp, stripBotAddressing,
@@ -12,7 +12,7 @@ import {
   clearChatHistory, dedupeChatHistory, addMemory, listMemories, clearMemories, deleteMemory, parseJson, messageStats,
 } from "./storage";
 import { ragReindexMemories } from "./rag";
-import { CONFIG_SCHEMA, CONFIG_PRESETS, getGlobalConfig, mergeConfig, buildHelp, buildConfigHelp, buildConfigGroupHelp, findConfigGroup, buildInfoStatus, setConfigParam } from "./config";
+import { CONFIG_SCHEMA, CONFIG_PRESETS, getGlobalConfig, mergeConfig, buildHelp, buildConfigHelp, buildConfigGroupHelp, findConfigGroup, buildInfoStatus, setConfigParam, reasoningLabel } from "./config";
 import { fetchModelPrice, fetchOpenRouterUsage, runLLMWithHistory } from "./llm";
 import { recallMemories, rewriteRecallQuery, ragRetrieveMemories } from "./recall";
 import { traceEvent, listTraces, getTrace, getTraceEvent, traceLLMStats, traceStageStats } from "./trace";
@@ -410,6 +410,28 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
       return t(lang, "model_reset_all");
     }
 
+    // /model [summary] reasoning [on|off|auto|<effort>] — the model's thinking: on/off + effort level. Plain
+    // `reasoning` = the chat model (replies, photos, pack commands); `summary reasoning` = /summary, the daily
+    // digest and fact curation. A level (or auto) also turns it on. Checked BEFORE the submodels below, or
+    // `summary reasoning` would be taken for a summary model id.
+    const rm = arg.match(/^(summary\s+)?reasoning\b\s*(.*)$/i);
+    if (rm) {
+      const forSummary = !!rm[1];
+      const onKey = forSummary ? "summary_reasoning" : "reasoning";
+      const effKey = forSummary ? "summary_reasoning_effort" : "reasoning_effort";
+      const prefix = forSummary ? "summary " : "";
+      const scope = t(lang, forSummary ? "reasoning_scope_summary" : "reasoning_scope_chat");
+      const v = rm[2].trim().toLowerCase();
+      if (!v) return t(lang, "model_reasoning_current", scope, reasoningLabel(lang, !!ctx.cfg[onKey], String(ctx.cfg[effKey] || "")), prefix);
+      const conf = { ...ctx.chatData.config };
+      if (v === "on" || v === "off") conf[onKey] = v === "on";
+      else if (v === "auto" || REASONING_EFFORTS.includes(v)) { conf[onKey] = true; conf[effKey] = v === "auto" ? "" : v; }
+      else return t(lang, "model_reasoning_bad", ["on", "off", "auto", ...REASONING_EFFORTS].join(" · "), prefix);
+      saveChatConfig(ctx, conf);
+      const eff = String(conf[effKey] ?? ctx.cfg[effKey] ?? "");
+      return t(lang, "model_reasoning_set", scope, reasoningLabel(lang, !!conf[onKey], eff));
+    }
+
     // The vision/summary subcommands — a separate model for photos / for /summary. They differ only
     // in the word and the config key; the labels (scope/notSet) are taken from the locale by word.
     const SUBMODELS = [
@@ -453,16 +475,17 @@ const ENGINE_COMMANDS: Record<string, CommandHandler> = {
       const textHeader = chatModel
         ? t(lang, "model_text", chatModel)
         : t(lang, "model_text_default", active);
-      let out = textHeader + (textInfo ? `\n${textInfo}` : "");
+      // Each block names where the model is used and whether it thinks (on/off + effort).
+      const chatThinking = "\n" + t(lang, "model_reasoning_line", reasoningLabel(lang, ctx.cfg.reasoning, ctx.cfg.reasoning_effort));
+      const sumThinking = "\n" + t(lang, "model_reasoning_line", reasoningLabel(lang, !!ctx.cfg.summary_reasoning, ctx.cfg.summary_reasoning_effort));
+      let out = textHeader + chatThinking + (textInfo ? `\n${textInfo}` : "");
 
-      // The vision-model block (only if a separate one is set) — with its own price/vision.
+      // The vision-model block (only if a separate one is set) — with its own price/vision. Photos think like the chat.
       if (visionModel) {
-        out += "\n\n" + t(lang, "model_photo", visionModel) + (visInfo ? `\n${visInfo}` : "");
+        out += "\n\n" + t(lang, "model_photo", visionModel) + chatThinking + (visInfo ? `\n${visInfo}` : "");
       }
-      // The summary-model block (only if a separate one is set).
-      if (summaryModel) {
-        out += "\n\n" + t(lang, "model_summary_line", summaryModel) + (sumInfo ? `\n${sumInfo}` : "");
-      }
+      // The summary block — always shown: its reasoning is a separate switch even on the main model.
+      out += "\n\n" + (summaryModel ? t(lang, "model_summary_line", summaryModel) : t(lang, "model_summary_main")) + sumThinking + (summaryModel && sumInfo ? `\n${sumInfo}` : "");
 
       // Account balance and chat spend.
       out += `\n\n${usage}`;

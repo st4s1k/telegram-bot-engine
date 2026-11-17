@@ -49,7 +49,7 @@ _Most commands with **no argument** show the current state/details — noted as 
 | `/retry` | Re-run your LAST message through the model (e.g. after an LLM timeout/error reply) — no copy-paste; it replays the message exactly (a content command re-runs as that command). |
 | `/rp` `[description]` / `off` | Bare: show the current role; else set / clear it. |
 | `/config` `[key value]` / `<group>` / `reset` / `preset <name>` | Bare: show all current settings; `<group>` (main/vision/thinking/rag/daily/lang): one section; or change a key / reset / apply a preset (see [keys](#config-keys)). |
-| `/model` `[id]` / `vision [id]` / `summary [id]` / `reset` | Bare: current model + price + balance + spend; else switch / reset (the `vision`/`summary` sub-models likewise show current when given no id). |
+| `/model` `[id]` / `vision [id]` / `summary [id]` / `[summary] reasoning on\|off\|auto\|<level>` / `reset` | Bare: current model + price + balance + spend, with each block's reasoning state (chat, photos, summary); else switch / reset (the `vision`/`summary` sub-models likewise show current when given no id). `reasoning` sets the chat model's thinking (replies, photos, pack commands), `summary reasoning` the summary model's (/summary, the daily digest, fact curation); a level (`minimal`/`low`/`medium`/`high`) or `auto` also turns it on. |
 | `/memory` `add` / `list` / `del N` / `forget` / `dedupe` / `size_chars N` | Bare: memory status; else manage long-term memory + history. |
 | `/lang` `[code]` | Bare: current UI language + available locales; else switch (unknown code is rejected). |
 | `/alias` `@user Name` / `del @user` | Bare: list per-chat display-name aliases (`username → name`); else set / remove one. |
@@ -298,7 +298,10 @@ Configured **per chat** (`/config <key> <value>`). Booleans — `on`/`off`; prob
 | `answer_prob` | float | Chance to reply to an arbitrary group message |
 | `history_chars` | int | Short-memory size in characters (500–100000) |
 | `model` · `vision_model` · `summary_model` | string | Chat models (`reset` — default) |
-| `reasoning` | bool | Allow the model to "think" |
+| `reasoning` | bool | Allow the model to "think" (chat replies, photos, pack commands) |
+| `reasoning_effort` | `auto`/`minimal`/`low`/`medium`/`high` | How hard the chat model thinks; `auto` = the model's default |
+| `summary_reasoning` | bool | Let the summary model think (/summary, daily digest, fact curation); off = faster |
+| `summary_reasoning_effort` | `auto`/`minimal`/`low`/`medium`/`high` | The summary model's level (also used by the forced retry on models that can't disable reasoning; `auto` → `low` there) |
 | `max_tokens` | int | Response length cap in tokens (256–65536, default 4000) |
 | `vision` | bool | Look at sent photos/stickers |
 | `rag` · `rag_top_k` · `rag_min_score` | bool/int/float | Long-term memory: on, how many facts, similarity threshold |

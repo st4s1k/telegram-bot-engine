@@ -288,6 +288,8 @@ export interface ConfigMeta {
   desc: string;
   min?: number;
   max?: number;
+  /** string keys: the allowed values (anything else is rejected); `auto` stores "" = the default */
+  values?: string[];
 }
 
 // A visual extracted from a message (photo/sticker).

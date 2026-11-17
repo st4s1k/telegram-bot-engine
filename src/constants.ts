@@ -19,6 +19,8 @@ export const SUMMARY_BACKLOG_CAP = 5000;
 export const PHOTO_CACHE_CAP = 50;
 // Network request timeouts.
 export const LLM_TIMEOUT_MS = 50_000;       // overall request ceiling (safeguard against hanging forever)
+// Reasoning effort levels OpenRouter accepts (`reasoning.effort`); "" in config = auto (the model's default).
+export const REASONING_EFFORTS = ["minimal", "low", "medium", "high"];
 export const LLM_REASONING_RETRY_MIN_TOKENS = 8000; // the mandatory-reasoning retry: min max_tokens (hidden reasoning counts against it)
 export const LLM_IDLE_TIMEOUT_MS = 25_000;  // max pause WITHOUT new chunks in the stream → abort
 export const GETFILE_TIMEOUT_MS = 10_000;   // Telegram getFile

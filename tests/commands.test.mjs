@@ -168,6 +168,46 @@ describe("COMMANDS.model", () => {
     assert.equal(ctx.chatData.config.summary_model, undefined);
     assert.equal(ctx.chatData.config.random, false); // other settings kept
   });
+  test("/model reasoning <level|on|off|auto>: chat reasoning switch + effort, sent in the request", async () => {
+    const ctx = makeCtxFor(makeMsg(), makeEnv());
+    assert.match(await COMMANDS.model(ctx, { argText: "reasoning high" }), /уровень high/);
+    assert.equal(ctx.chatData.config.reasoning, true);
+    assert.equal(ctx.chatData.config.reasoning_effort, "high");
+    const cfg = mergeConfig(getGlobalConfig(makeEnv()), ctx.chatData.config);
+    await callOpenRouter(cfg, [{ role: "user", content: "x" }]);
+    assert.deepEqual(FETCH.chatBody().reasoning, { effort: "high", exclude: true });
+    assert.match(await COMMANDS.model(ctx, { argText: "reasoning off" }), /выкл/);
+    assert.equal(ctx.chatData.config.reasoning, false);
+    assert.match(await COMMANDS.model(ctx, { argText: "reasoning auto" }), /по умолчанию модели/);
+    assert.equal(ctx.chatData.config.reasoning, true);
+    assert.equal(ctx.chatData.config.reasoning_effort, "");
+    assert.match(await COMMANDS.model(ctx, { argText: "reasoning max" }), /Не понял/);
+    assert.match(await COMMANDS.model(ctx, { argText: "reasoning" }), /Рассуждения чата/);
+  });
+  test("/model summary reasoning on: the summary call thinks, with room in max_tokens; not taken for a model id", async () => {
+    const env = makeEnv();
+    const ctx = makeCtxFor(makeMsg(), env);
+    await COMMANDS.model(ctx, { argText: "summary reasoning medium" });
+    assert.equal(ctx.chatData.config.summary_model, undefined); // not a model named "reasoning"
+    assert.equal(ctx.chatData.config.summary_reasoning, true);
+    assert.equal(ctx.chatData.config.summary_reasoning_effort, "medium");
+    const cfg = mergeConfig(getGlobalConfig(env), ctx.chatData.config);
+    await runLLMWithHistory(cfg, "sys", [], "x", makeMsg(), { maxTokens: 2000, reasoning: !!cfg.summary_reasoning, effort: cfg.summary_reasoning_effort, kind: "summary" });
+    const body = FETCH.chatBody();
+    assert.deepEqual(body.reasoning, { effort: "medium", exclude: true });
+    assert.ok(body.max_tokens >= 8000, "hidden reasoning must not eat the digest");
+  });
+  test("/model (no arg) shows reasoning per block; /info shows it next to the model; /config validates the level", async () => {
+    const cd = { ...DEFAULT_CHAT_DATA(), config: { reasoning_effort: "low" } };
+    const ctx = makeCtxFor(makeMsg(), makeEnv(), cd);
+    const out = await COMMANDS.model(ctx, { argText: "" });
+    assert.match(out, /🤔 Рассуждения: вкл · уровень low/);
+    assert.match(out, /📝 Сводка: основная модель\n🤔 Рассуждения: выкл/);
+    assert.match(buildInfoStatus(ctx), /🤔 вкл · уровень low/);
+    assert.match(setConfigParam(ctx, "reasoning_effort", "turbo"), /одно из: auto · minimal · low · medium · high/);
+    setConfigParam(ctx, "summary_reasoning_effort", "AUTO");
+    assert.equal(ctx.chatData.config.summary_reasoning_effort, "");
+  });
   test("/alias: set / list / del stores a per-chat alias in config", async () => {
     const ctx = makeCtxFor(makeMsg(), makeEnv());
     const set = await COMMANDS.alias(ctx, { argText: "@DesignMain Глеб" });

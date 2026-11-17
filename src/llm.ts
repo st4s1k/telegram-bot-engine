@@ -151,8 +151,10 @@ export interface LLMMeta { finishReason?: string }
 export async function callOpenRouter(
   cfg: BotConfig,
   messages: LLMMessage[],
-  { tag = "req", extraLog = {}, ctx = null, modelOverride = "", maxTokens, reasoning, onMeta, kind: kindOpt, mandatoryRetry = false }: {
+  { tag = "req", extraLog = {}, ctx = null, modelOverride = "", maxTokens, reasoning, effort, onMeta, kind: kindOpt, mandatoryRetry = false }: {
     tag?: string; extraLog?: Record<string, unknown>; ctx?: Ctx | null; modelOverride?: string; maxTokens?: number; reasoning?: boolean; onMeta?: (m: LLMMeta) => void;
+    /** reasoning effort (minimal|low|medium|high; "" = the model's default); default cfg.reasoning_effort */
+    effort?: string;
     /** internal: this is the retry after "reasoning is mandatory" — see below */
     mandatoryRetry?: boolean;
     /** what this call is for, in the trace journal: reply | preview | rewrite | curation | summary | vision | <pack command> (default: reply) */
@@ -165,9 +167,12 @@ export async function callOpenRouter(
   // Per-call overrides (auxiliary calls — summary/curation — pass a tight cap + reasoning off); else cfg.
   // On the mandatory-reasoning retry the hidden reasoning tokens count against max_tokens, so a tight aux cap
   // (summary 2000) can be spent entirely on thinking and the visible answer comes back EMPTY — give it room.
-  const capTok = maxTokens ?? cfg.maxTokens;
-  const maxTok = mandatoryRetry && Number.isFinite(capTok) && capTok > 0 ? Math.max(capTok, LLM_REASONING_RETRY_MIN_TOKENS) : capTok;
+  // The same holds when an aux caller (explicit tight maxTokens) runs WITH reasoning (/model summary reasoning on).
   const useReasoning = reasoning ?? cfg.reasoning;
+  const capTok = maxTokens ?? cfg.maxTokens;
+  const lift = mandatoryRetry || (useReasoning && maxTokens !== undefined);
+  const maxTok = lift && Number.isFinite(capTok) && capTok > 0 ? Math.max(capTok, LLM_REASONING_RETRY_MIN_TOKENS) : capTok;
+  const eff = String(effort ?? cfg.reasoning_effort ?? "");
   const payload = {
     model,
     messages,
@@ -179,8 +184,11 @@ export async function callOpenRouter(
     // Controlling the "thinking" of reasoning models:
     //  - reasoning on (default): it thinks, but we don't send the reasoning tokens (exclude).
     //  - reasoning off: enabled:false disables the generation of reasoning (faster).
-    //  - the mandatory-reasoning retry: the caller wanted it off, so think as little as allowed (effort low).
-    reasoning: mandatoryRetry ? { effort: "low", exclude: true } : useReasoning ? { exclude: true } : { enabled: false },
+    //  - effort (/model reasoning <level>): how hard it thinks; "" = the model's default.
+    //  - the mandatory-reasoning retry: the caller wanted it off, so think as little as allowed (effort low,
+    //    unless the chat set its own level).
+    reasoning: mandatoryRetry ? { effort: eff || "low", exclude: true }
+      : useReasoning ? { ...(eff ? { effort: eff } : {}), exclude: true } : { enabled: false },
     // Response length limit. We add the field only for a valid value > 0 — otherwise let
     // the model use its own default. Guards against overly long responses (but not against slow
     // reasoning itself).
@@ -232,7 +240,7 @@ export async function callOpenRouter(
       if (res.status === 400 && !useReasoning && REASONING_MANDATORY_RE.test(body)) {
         logLLM(cfg, tag + "_retry_reasoning", { rid, elapsed });
         llmStat({ rid, tag, model, elapsed, outcome: "retry_reasoning" });
-        return callOpenRouter(cfg, messages, { tag, extraLog, ctx, modelOverride, maxTokens, reasoning: true, onMeta, kind, mandatoryRetry: true });
+        return callOpenRouter(cfg, messages, { tag, extraLog, ctx, modelOverride, maxTokens, reasoning: true, effort, onMeta, kind, mandatoryRetry: true });
       }
       if (res.status === 402) return fb.fallbackNoCredits;
       return fb.fallbackError;
@@ -324,11 +332,11 @@ export async function runLLMWithHistory(
   history: HistoryItem[],
   userContent: string,
   msg: TgMessage,
-  { forceAppendUser = false, ctx = null, modelOverride = "", maxTokens, reasoning, onMeta, kind }: { forceAppendUser?: boolean; ctx?: Ctx | null; modelOverride?: string; maxTokens?: number; reasoning?: boolean; onMeta?: (m: LLMMeta) => void; kind?: string } = {},
+  { forceAppendUser = false, ctx = null, modelOverride = "", maxTokens, reasoning, effort, onMeta, kind }: { forceAppendUser?: boolean; ctx?: Ctx | null; modelOverride?: string; maxTokens?: number; reasoning?: boolean; effort?: string; onMeta?: (m: LLMMeta) => void; kind?: string } = {},
 ): Promise<string> {
   const messages = toLLMMessages(systemPrompt, history, userContent, msg, { forceAppendUser, tz: cfg.timezone });
   // modelOverride empty → callOpenRouter takes cfg.openrouterModel (normal behavior).
-  return callOpenRouter(cfg, messages, { tag: "req", extraLog: { count: messages.length }, ctx, modelOverride, maxTokens, reasoning, onMeta, kind });
+  return callOpenRouter(cfg, messages, { tag: "req", extraLog: { count: messages.length }, ctx, modelOverride, maxTokens, reasoning, effort, onMeta, kind });
 }
 
 export function toLLMMessages(

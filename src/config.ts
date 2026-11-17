@@ -4,6 +4,7 @@
 // keys and their validation. The help/status/config-reference builders also live here.
 
 import { escapeRegExp, historyChars } from "./utils";
+import { REASONING_EFFORTS } from "./constants";
 import { t, tList, DEFAULT_LANG, LOCALES } from "./i18n";
 import { saveChatConfig } from "./storage";
 import { getPersona, getPersonaConfig, getAllCommands, getPersonaTexts } from "./persona/registry";
@@ -24,6 +25,10 @@ const ENGINE_CONFIG_SCHEMA: Record<string, ConfigMeta> = {
   "vision_model":    { type: "string", desc: "cfg_desc_vision_model", max: 100 },
   "summary_model":   { type: "string", desc: "cfg_desc_summary_model", max: 100 },
   "reasoning":      { type: "bool",  desc: "cfg_desc_reasoning" },
+  "reasoning_effort": { type: "string", desc: "cfg_desc_reasoning_effort", values: REASONING_EFFORTS },
+  // the summary model's own reasoning (/summary, the daily digest, fact curation) — off by default: speed
+  "summary_reasoning": { type: "bool", desc: "cfg_desc_summary_reasoning" },
+  "summary_reasoning_effort": { type: "string", desc: "cfg_desc_summary_reasoning_effort", values: REASONING_EFFORTS },
   "max_tokens":     { type: "int",   desc: "cfg_desc_max_tokens", min: 256, max: 65536 },
 
   // --- LONG-TERM MEMORY (RAG) ---
@@ -55,7 +60,7 @@ export const CONFIG_SCHEMA: Record<string, ConfigMeta> = { ...ENGINE_CONFIG_SCHE
 const ENGINE_CONFIG_GROUPS: Record<string, string[]> = {
   "cfg_group_main": ["random", "answer_prob"],
   "cfg_group_vision": ["vision"],
-  "cfg_group_thinking": ["reasoning", "max_tokens"],
+  "cfg_group_thinking": ["reasoning", "reasoning_effort", "summary_reasoning", "summary_reasoning_effort", "max_tokens"],
   "cfg_group_rag": ["rag", "rag_top_k", "rag_min_score"],
   "cfg_group_daily": ["daily_summary", "timezone"],
   "cfg_group_lang": ["lang"],
@@ -143,6 +148,9 @@ export function getGlobalConfig(env: Env): BotConfig {
     // Disabled with /config reasoning off (or env ENABLE_REASONING=false) — then the model
     // responds faster. Non-reasoning models ignore this parameter.
     reasoning: env.ENABLE_REASONING === undefined ? true : bool(env.ENABLE_REASONING),
+    reasoning_effort: "",           // "" = auto (the model's default); /model reasoning <level>
+    summary_reasoning: false,       // summary/curation think only when asked (/model summary reasoning on)
+    summary_reasoning_effort: "",
     // Default vision detail: low (cheap) or high (expensive, sees details).
     visionDetail: ["low", "high"].includes(String(env.VISION_DETAIL || "").toLowerCase())
       ? String(env.VISION_DETAIL).toLowerCase()
@@ -239,6 +247,12 @@ export function parseConfigValue(meta: ConfigMeta, rawVal: string, lang: string 
       return { ok: true, value: "" };
     }
     if (!v) return { ok: false, error: t(lang, "cfg_err_empty") };
+    if (meta.values) {
+      const lv = v.toLowerCase();
+      if (lv === "auto") return { ok: true, value: "" };
+      if (!meta.values.includes(lv)) return { ok: false, error: t(lang, "cfg_err_enum", ["auto", ...meta.values].join(" · ")) };
+      return { ok: true, value: lv };
+    }
     if (/\s/.test(v)) return { ok: false, error: t(lang, "cfg_err_spaces") };
     if (v.length > (meta.max ?? 100)) return { ok: false, error: t(lang, "cfg_err_toolong", meta.max ?? 100) };
     return { ok: true, value: v };
@@ -294,6 +308,12 @@ export function buildHelp(lang: string = DEFAULT_LANG): string {
   return persona ? `${base}\n\n${persona}` : base;
 }
 
+// "on · effort high" / "on (auto)" / "off" — the reasoning state shown next to a model in /model and /info.
+export function reasoningLabel(lang: string, on: boolean, effort: string): string {
+  if (!on) return t(lang, "reasoning_off");
+  return effort ? t(lang, "reasoning_on_effort", effort) : t(lang, "reasoning_on_auto");
+}
+
 export function buildInfoStatus(ctx: Ctx): string {
   const { cfg, chatData } = ctx;
   const lang = cfg.lang;
@@ -309,7 +329,7 @@ export function buildInfoStatus(ctx: Ctx): string {
   if (persona.infoLines) for (const line of persona.infoLines(ctx)) msg += `${line}\n`;
   msg += t(lang, "info_role", role) + "\n";
   msg += `${status}\n`;
-  msg += t(lang, "info_model", cfg.openrouterModel) + "\n";
+  msg += t(lang, "info_model", cfg.openrouterModel, reasoningLabel(lang, cfg.reasoning, cfg.reasoning_effort)) + "\n";
   msg += t(lang, "info_history", histLen, histChars, cfg.history_chars) + "\n";
   msg += t(lang, "info_features", t(lang, cfg.rag ? "cfg_on" : "cfg_off"), t(lang, cfg.vision ? "cfg_on" : "cfg_off"), t(lang, cfg.daily_summary ? "cfg_on" : "cfg_off")) + "\n";
   msg += t(lang, "info_lang", lang) + "\n";

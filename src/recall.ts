@@ -141,7 +141,7 @@ export async function rewriteRecallQuery(ctx: Ctx, raw: string): Promise<string>
         prior.slice(-RAG_REWRITE_HISTORY),
         q,
         ctx.msg,
-        { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel, maxTokens: RAG_REWRITE_MAX_TOKENS, reasoning: false, kind: "rewrite" },
+        { forceAppendUser: true, ctx, modelOverride: ctx.cfg.summaryModel, maxTokens: RAG_REWRITE_MAX_TOKENS, reasoning: false, effort: ctx.cfg.summary_reasoning_effort, kind: "rewrite" }, // always fast: it runs on every message
       ),
       RAG_REWRITE_TIMEOUT_MS,
     );
