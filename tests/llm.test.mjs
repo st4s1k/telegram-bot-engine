@@ -24,7 +24,7 @@ const {
   shouldAnswer, pickRandomRandomKind, tryQuickReply, tryCommand, handleChatMessage,
   handleTelegramMessage, COMMANDS, LLM_COMMANDS, TECH_COMMANDS,
   RANDOM_HANDLERS,
-  TELEGRAM_MSG_LIMIT, HISTORY_HARD_CAP_ITEMS, FALLBACK_LLM_ERROR, FALLBACK_NO_CREDITS,
+  TELEGRAM_MSG_LIMIT, HISTORY_HARD_CAP_ITEMS, FALLBACK_LLM_ERROR, FALLBACK_NO_CREDITS, LLM_REASONING_RETRY_MIN_TOKENS,
   LLM_IDLE_TIMEOUT_MS,
   // harness
   makeEnv, makeMsg, makeKV, makeCtxFor, photoSizes, sse, jsonResp, streamResp,
@@ -75,7 +75,39 @@ describe("callOpenRouter", () => {
     const bodies = FETCH.of("/chat/completions").map(c => c.body);
     assert.equal(bodies.length, 2);
     assert.deepEqual(bodies[0].reasoning, { enabled: false }); // the fast path first…
-    assert.deepEqual(bodies[1].reasoning, { exclude: true }); // …then reasoning kept but hidden
+    assert.deepEqual(bodies[1].reasoning, { effort: "low", exclude: true }); // …then reasoning kept, minimal and hidden
+  });
+
+  test("the mandatory-reasoning retry lifts a tight max_tokens (hidden reasoning counts against it)", async () => {
+    let n = 0;
+    FETCH.set("chat", () => (++n === 1
+      ? jsonResp({ error: { message: "Reasoning is mandatory for this endpoint and cannot be disabled." } }, { ok: false, status: 400 })
+      : sse(["digest"])));
+    assert.equal(await callOpenRouter(getGlobalConfig(makeEnv()), msgs(), { reasoning: false, maxTokens: 2000 }), "digest");
+    const bodies = FETCH.of("/chat/completions").map(c => c.body);
+    assert.equal(bodies[0].max_tokens, 2000);
+    assert.equal(bodies[1].max_tokens, LLM_REASONING_RETRY_MIN_TOKENS);
+  });
+
+  test("an empty stream is journaled with WHY: chunks, reasoning, finish, a mid-stream error", async () => {
+    const env = makeEnv();
+    const ctx = makeCtxFor(makeMsg({ chatId: 77 }), env);
+    FETCH.set("chat", () => sse([], { raw: [
+      "data: " + JSON.stringify({ choices: [{ delta: { reasoning: "thinking…" } }] }),
+      "data: " + JSON.stringify({ choices: [{ delta: {}, finish_reason: "length" }] }),
+      "data: [DONE]"].join("\n") }));
+    assert.equal(await callOpenRouter(getGlobalConfig(env), msgs(), { ctx, kind: "summary" }), FALLBACK_LLM_ERROR);
+    let row = await env.DB.prepare("SELECT outcome, detail FROM trace_events WHERE stage='llm' ORDER BY id DESC LIMIT 1").first();
+    assert.equal(row.outcome, "empty");
+    let why = JSON.parse(JSON.parse(row.detail).response);
+    assert.equal(why.finish, "length");
+    assert.equal(why.reasoningChars, "thinking…".length);
+    assert.equal(why.chunks, 2);
+    FETCH.set("chat", () => sse([], { raw: "data: " + JSON.stringify({ error: { message: "provider overloaded" } }) + "\ndata: [DONE]" }));
+    await callOpenRouter(getGlobalConfig(env), msgs(), { ctx, kind: "summary" });
+    row = await env.DB.prepare("SELECT outcome, detail FROM trace_events WHERE stage='llm' ORDER BY id DESC LIMIT 1").first();
+    assert.equal(row.outcome, "stream_error");
+    assert.match(JSON.parse(JSON.parse(row.detail).response).error, /overloaded/);
   });
 
   test("HTTP 400 with another message → no retry, fallback", async () => {

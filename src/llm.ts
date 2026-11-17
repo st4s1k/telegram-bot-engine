@@ -3,7 +3,7 @@
 // cost deduction from the final usage chunk, graceful degradation to fallbacks.
 
 import {
-  GETFILE_TIMEOUT_MS, LLM_IDLE_TIMEOUT_MS, LLM_TIMEOUT_MS,
+  GETFILE_TIMEOUT_MS, LLM_IDLE_TIMEOUT_MS, LLM_TIMEOUT_MS, LLM_REASONING_RETRY_MIN_TOKENS,
 } from "./constants";
 import { newReqId, formatWithMeta, getUserMeta } from "./utils";
 import { traceLLM } from "./trace";
@@ -151,8 +151,10 @@ export interface LLMMeta { finishReason?: string }
 export async function callOpenRouter(
   cfg: BotConfig,
   messages: LLMMessage[],
-  { tag = "req", extraLog = {}, ctx = null, modelOverride = "", maxTokens, reasoning, onMeta, kind: kindOpt }: {
+  { tag = "req", extraLog = {}, ctx = null, modelOverride = "", maxTokens, reasoning, onMeta, kind: kindOpt, mandatoryRetry = false }: {
     tag?: string; extraLog?: Record<string, unknown>; ctx?: Ctx | null; modelOverride?: string; maxTokens?: number; reasoning?: boolean; onMeta?: (m: LLMMeta) => void;
+    /** internal: this is the retry after "reasoning is mandatory" — see below */
+    mandatoryRetry?: boolean;
     /** what this call is for, in the trace journal: reply | preview | rewrite | curation | summary | vision | <pack command> (default: reply) */
     kind?: string;
   } = {},
@@ -161,7 +163,10 @@ export async function callOpenRouter(
   const model = modelOverride || cfg.openrouterModel;
   const fb = getPersonaTexts(cfg.lang); // persona fallbacks in the needed locale (the pack is already registered)
   // Per-call overrides (auxiliary calls — summary/curation — pass a tight cap + reasoning off); else cfg.
-  const maxTok = maxTokens ?? cfg.maxTokens;
+  // On the mandatory-reasoning retry the hidden reasoning tokens count against max_tokens, so a tight aux cap
+  // (summary 2000) can be spent entirely on thinking and the visible answer comes back EMPTY — give it room.
+  const capTok = maxTokens ?? cfg.maxTokens;
+  const maxTok = mandatoryRetry && Number.isFinite(capTok) && capTok > 0 ? Math.max(capTok, LLM_REASONING_RETRY_MIN_TOKENS) : capTok;
   const useReasoning = reasoning ?? cfg.reasoning;
   const payload = {
     model,
@@ -174,7 +179,8 @@ export async function callOpenRouter(
     // Controlling the "thinking" of reasoning models:
     //  - reasoning on (default): it thinks, but we don't send the reasoning tokens (exclude).
     //  - reasoning off: enabled:false disables the generation of reasoning (faster).
-    reasoning: useReasoning ? { exclude: true } : { enabled: false },
+    //  - the mandatory-reasoning retry: the caller wanted it off, so think as little as allowed (effort low).
+    reasoning: mandatoryRetry ? { effort: "low", exclude: true } : useReasoning ? { exclude: true } : { enabled: false },
     // Response length limit. We add the field only for a valid value > 0 — otherwise let
     // the model use its own default. Guards against overly long responses (but not against slow
     // reasoning itself).
@@ -226,7 +232,7 @@ export async function callOpenRouter(
       if (res.status === 400 && !useReasoning && REASONING_MANDATORY_RE.test(body)) {
         logLLM(cfg, tag + "_retry_reasoning", { rid, elapsed });
         llmStat({ rid, tag, model, elapsed, outcome: "retry_reasoning" });
-        return callOpenRouter(cfg, messages, { tag, extraLog, ctx, modelOverride, maxTokens, reasoning: true, onMeta, kind });
+        return callOpenRouter(cfg, messages, { tag, extraLog, ctx, modelOverride, maxTokens, reasoning: true, onMeta, kind, mandatoryRetry: true });
       }
       if (res.status === 402) return fb.fallbackNoCredits;
       return fb.fallbackError;
@@ -241,6 +247,8 @@ export async function callOpenRouter(
     let content = "";
     let cost = NaN;
     let finishReason: string | undefined;
+    // For the trace when nothing visible arrives: how many chunks came, how much hidden reasoning, a mid-stream error.
+    let chunks = 0, reasoningChars = 0, streamError = "";
 
     for (;;) {
       const { done, value } = await reader.read();
@@ -258,6 +266,11 @@ export async function callOpenRouter(
         if (data === "[DONE]") continue;
         let json: any;
         try { json = JSON.parse(data); } catch { continue; } // incomplete/service line — skip it
+        chunks++;
+        // OpenRouter reports a failure AFTER the 200 headers as an `error` object inside the stream.
+        if (json?.error) streamError = String(json.error.message || JSON.stringify(json.error)).slice(0, 500);
+        const rdelta = json?.choices?.[0]?.delta?.reasoning;
+        if (typeof rdelta === "string") reasoningChars += rdelta.length;
         const fr = json?.choices?.[0]?.finish_reason;
         if (typeof fr === "string" && fr) finishReason = fr;
         const delta = json?.choices?.[0]?.delta?.content;
@@ -272,7 +285,9 @@ export async function callOpenRouter(
     if (!content || !content.trim()) {
       console.warn("LLM empty stream", { rid, tag, elapsed });
       llmStat({ rid, tag, model, elapsed, outcome: "empty" });
-      await record("empty");
+      // Say WHY it was empty (the journal used to show just `empty`, finish null): a stream error, the cap spent
+      // on reasoning (finish "length"), or the model simply sending nothing.
+      await record(streamError ? "stream_error" : "empty", { finish: finishReason, response: JSON.stringify({ chunks, reasoningChars, finish: finishReason ?? null, max_tokens: maxTok ?? null, error: streamError || undefined }) });
       return fb.fallbackError;
     }
     logLLM(cfg, tag + "_ok", { rid, elapsed, len: content.length, cost });
